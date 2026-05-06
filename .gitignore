@@ -36,3 +36,4 @@ customer-app/android/build/
 # Gradle caches
 .gradle/
 **/.gradle/
+.gradle-user-home/
