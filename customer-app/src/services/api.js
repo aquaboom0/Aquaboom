@@ -31,7 +31,27 @@ api.interceptors.request.use(
 // Response interceptor - handle errors
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
+    const req = error?.config || {};
+    const base = String(req.baseURL || getApiBaseUrlSync() || '');
+    const isRenderHost = /\.onrender\.com/i.test(base);
+    const isNetworkLevel = !error.response && (error.code === 'ECONNABORTED' || error.code === 'ERR_NETWORK' || error.message === 'Network Error');
+
+    /**
+     * Render free services can sleep and take ~50s+ on first hit.
+     * Wake once via /health and retry the original request once.
+     */
+    if (isRenderHost && isNetworkLevel && !req.__retriedAfterWakeup) {
+      req.__retriedAfterWakeup = true;
+      const origin = base.replace(/\/api\/?$/i, '');
+      try {
+        await axios.get(`${origin}/health`, { timeout: 90000 });
+      } catch (_) {
+        // Even if warm-up ping fails, retry original request once.
+      }
+      return api(req);
+    }
+
     if (error.response?.status === 401) {
       AsyncStorage.multiRemove([
         'authToken',
