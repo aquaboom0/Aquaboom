@@ -1,0 +1,38 @@
+.DS_Store
+.idea/
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Environment / secrets
+.env
+**/.env
+*.pem
+*.key
+*.p12
+*.jks
+credentials.json
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# Build outputs
+dist/
+build/
+coverage/
+*.apk
+*.aab
+
+# Expo / React Native
+.expo/
+.expo-shared/
+customer-app/android/app/build/
+customer-app/android/build/
+
+# Gradle caches
+.gradle/
+**/.gradle/

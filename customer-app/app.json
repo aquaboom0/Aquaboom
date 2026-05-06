@@ -1,0 +1,52 @@
+{
+  "expo": {
+    "name": "AquaBoom",
+    "slug": "aquaboom",
+    "version": "1.0.3",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0ea5e9"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.aquarush.customer",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "AquaBoom needs your location to deliver water bottles to your address.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "AquaBoom needs your location to track your delivery."
+      }
+    },
+    "android": {
+      "googleServicesFile": "./google-services.json",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0ea5e9"
+      },
+      "package": "com.aquarush.customer",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "POST_NOTIFICATIONS"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-location",
+      "expo-image-picker",
+      "expo-notifications"
+    ],
+    "extra": {
+      "apiPort": 5001,
+      "apiLanHost": "192.168.1.3",
+      "useLanForAndroid": true
+    }
+  }
+}
