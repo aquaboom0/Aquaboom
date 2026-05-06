@@ -38,26 +38,42 @@ export function getSocketUrlSync() {
   return getAssetBaseUrlSync();
 }
 
-/** @returns {{ host: string, port: string } | null} */
+/** @returns {{ host: string, port: string, protocol: string } | null} */
 export function parseHostPortFromOverride() {
   if (!cache?.assetBaseUrl) return null;
   try {
     const u = new URL(cache.assetBaseUrl);
     const port = u.port ? String(u.port) : u.protocol === 'https:' ? '443' : '5001';
-    return { host: u.hostname, port };
+    return { host: u.hostname, port, protocol: u.protocol.replace(':', '') };
   } catch {
     return null;
   }
 }
 
-export async function persistEndpointOverride(host, port) {
-  const h = String(host || '').trim();
-  const p = Number(String(port).trim()) || 5001;
-  if (!h) {
+export async function persistEndpointOverride(host, port, protocol = '') {
+  const rawHost = String(host || '').trim();
+  if (!rawHost) {
     await clearEndpointOverride();
     return;
   }
-  const asset = `http://${h}:${p}`;
+  let resolvedProtocol = String(protocol || '').trim().toLowerCase();
+  let resolvedHost = rawHost;
+  if (/^https?:\/\//i.test(rawHost)) {
+    const parsed = new URL(rawHost);
+    resolvedHost = parsed.hostname;
+    if (!resolvedProtocol) resolvedProtocol = parsed.protocol.replace(':', '');
+    if (!port && parsed.port) port = parsed.port;
+  }
+  if (!resolvedProtocol) {
+    resolvedProtocol = /\.onrender\.com$/i.test(resolvedHost) ? 'https' : 'http';
+  }
+  const p = Number(String(port).trim()) || (resolvedProtocol === 'https' ? 443 : 5001);
+  const needsExplicitPort = !(
+    (resolvedProtocol === 'https' && p === 443) ||
+    (resolvedProtocol === 'http' && p === 80)
+  );
+  const hostPort = needsExplicitPort ? `${resolvedHost}:${p}` : resolvedHost;
+  const asset = `${resolvedProtocol}://${hostPort}`;
   const next = { apiBaseUrl: `${asset}/api`, assetBaseUrl: asset };
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   cache = next;

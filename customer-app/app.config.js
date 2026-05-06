@@ -1,7 +1,7 @@
 /**
  * Bakes `expo.extra` into native builds so `Constants.expoConfig.extra` works in release APKs.
- * API base: http://{apiLanHost}:{apiPort} — set in app.json → expo.extra, then rebuild native app.
- * Backend CORS: backend/.env CLIENT_URL should list the same LAN IP with Metro port :8081 (comma-separated).
+ * Preferred for production: expo.extra.apiBaseUrl (e.g. https://aquaboom.onrender.com).
+ * LAN fallback: http://{apiLanHost}:{apiPort} — set in app.json → expo.extra, then rebuild native app.
  */
 const appJson = require('./app.json');
 
@@ -15,6 +15,9 @@ module.exports = {
     ...appJson.expo,
     extra: {
       ...fromJson,
+      apiBaseUrl:
+        (fromJson.apiBaseUrl != null && String(fromJson.apiBaseUrl).trim()) ||
+        'https://aquaboom.onrender.com',
       apiPort: Number(fromJson.apiPort) || DEFAULT_API_PORT,
       apiLanHost:
         (fromJson.apiLanHost != null && String(fromJson.apiLanHost).trim()) ||

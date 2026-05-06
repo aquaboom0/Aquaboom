@@ -787,15 +787,15 @@ const AdminDashboardScreen = () => {
   const openApiEndpointModal = () => {
     const o = parseHostPortFromOverride();
     let host = '';
-    let port = '5001';
+    let port = '443';
     if (o) {
       host = o.host;
-      port = o.port && String(o.port) !== '80' ? String(o.port) : '5001';
+      port = o.port ? String(o.port) : o.protocol === 'http' ? '5001' : '443';
     } else {
       try {
         const url = new URL(getApiBaseUrlSync());
         host = url.hostname;
-        port = url.port ? String(url.port) : '5001';
+        port = url.port ? String(url.port) : url.protocol === 'http:' ? '5001' : '443';
       } catch {
         /* keep defaults */
       }
@@ -811,7 +811,8 @@ const AdminDashboardScreen = () => {
       if (!h) {
         await clearEndpointOverride();
       } else {
-        await persistEndpointOverride(h, apiPortInput);
+        const protocolHint = /\.onrender\.com$/i.test(h) ? 'https' : '';
+        await persistEndpointOverride(h, apiPortInput, protocolHint);
       }
       setApiModalVisible(false);
       dispatch(disconnectSocket(undefined));
@@ -905,18 +906,18 @@ const AdminDashboardScreen = () => {
       <Modal transparent visible={apiModalVisible} animationType="fade" onRequestClose={() => setApiModalVisible(false)}>
         <TouchableOpacity style={styles.apiModalBackdrop} activeOpacity={1} onPress={() => setApiModalVisible(false)}>
           <View style={styles.apiModalCard}>
-            <Text style={styles.apiModalTitle}>Backend API (LAN)</Text>
+            <Text style={styles.apiModalTitle}>Backend API</Text>
             <Text style={styles.apiModalHint}>
-              Phone must reach your computer’s IP on port {apiPortInput || '5001'}. Set host to your Mac/PC IPv4 from System Settings →
-              Wi‑Fi → details (e.g. 192.168.1.x).
+              For Render, use host like aquaboom.onrender.com and port 443. For LAN, use your PC IPv4 (e.g. 192.168.1.x) and port
+              5001.
             </Text>
             <Text style={styles.apiModalCurrent} numberOfLines={2}>
               Current: {getApiBaseUrlSync()}
             </Text>
-            <Text style={styles.apiModalLabel}>IPv4 host</Text>
+            <Text style={styles.apiModalLabel}>Host (domain or IPv4)</Text>
             <TextInput
               style={styles.apiModalInput}
-              placeholder="192.168.1.3"
+              placeholder="aquaboom.onrender.com or 192.168.1.3"
               placeholderTextColor={ADMIN_THEME.placeholder}
               value={apiHostInput}
               onChangeText={setApiHostInput}
@@ -943,7 +944,7 @@ const AdminDashboardScreen = () => {
                   await clearEndpointOverride();
                   const url = new URL(getApiBaseUrlSync());
                   setApiHostInput(url.hostname);
-                  setApiPortInput(url.port ? String(url.port) : '5001');
+                  setApiPortInput(url.port ? String(url.port) : url.protocol === 'http:' ? '5001' : '443');
                 }}
               >
                 <Text style={styles.apiModalBtnGhostTxt}>Reset to app default</Text>

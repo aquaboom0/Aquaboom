@@ -5,10 +5,15 @@ import * as Device from 'expo-device';
 /** Must match LAN IP where the backend runs (`app.config.js` / `app.json` → expo.extra.apiLanHost). */
 const DEFAULT_LAN_HOST = '192.168.1.3';
 const DEFAULT_API_PORT = 5001;
+const DEFAULT_CLOUD_API_BASE_URL = 'https://aquaboom.onrender.com';
 
 // Backend port — must match backend `.env` PORT (e.g. 5001)
 const extra = Constants.expoConfig?.extra ?? {};
 const BACKEND_PORT = Number(extra.apiPort) || DEFAULT_API_PORT;
+const cloudApiBaseUrl =
+  typeof extra.apiBaseUrl === 'string' && extra.apiBaseUrl.trim()
+    ? extra.apiBaseUrl.trim().replace(/\/+$/, '')
+    : '';
 
 /**
  * Physical device on Wi‑Fi: uses `apiLanHost` from native `expo.extra` (see app.config.js).
@@ -48,7 +53,8 @@ function getApiHost() {
 const host = getApiHost();
 
 // API Configuration — resolved at runtime for emulator vs physical device
-export const ASSET_BASE_URL = `http://${host}:${BACKEND_PORT}`;
+export const ASSET_BASE_URL =
+  cloudApiBaseUrl || DEFAULT_CLOUD_API_BASE_URL || `http://${host}:${BACKEND_PORT}`;
 export const API_BASE_URL = `${ASSET_BASE_URL}/api`;
 export const SOCKET_URL = ASSET_BASE_URL;
 

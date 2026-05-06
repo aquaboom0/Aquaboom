@@ -10,12 +10,19 @@ export function explainApiFailure(error) {
   const msg = String(error.message || '');
   const code = error.code;
   const apiBase = getApiBaseUrlSync();
+  const isRenderHost = /\.onrender\.com/i.test(apiBase);
 
   if (code === 'ECONNABORTED' || /timeout/i.test(msg)) {
+    if (isRenderHost) {
+      return `Request timed out reaching ${apiBase}.\n\nRender free instances can take ~50+ seconds to wake from sleep on the first request.\n\nPlease wait and retry once. If it keeps failing, verify the Render service is Live and healthy.`;
+    }
     return `Request timed out reaching ${apiBase}.\n\nCheck Wi‑Fi, that the backend is running, and the correct API address. Tap "API" on the admin bar to set your computer's LAN IP without rebuilding.`;
   }
 
   if (msg === 'Network Error' || code === 'ERR_NETWORK') {
+    if (isRenderHost) {
+      return `Cannot reach server at ${apiBase}.\n\n• Confirm Render service is Live (open ${apiBase.replace(/\/api$/, '/health')} in browser)\n• First call after inactivity may need ~1 minute on free tier — retry once\n• Ensure phone has internet (Wi‑Fi or mobile data) and no VPN/proxy blocking HTTPS`;
+    }
     return `Cannot reach server at ${apiBase}.\n\n• Same Wi‑Fi for phone and PC (try turning off mobile data / VPN)\n• Backend: cd backend && npm start\n• Mac firewall: allow Node for incoming connections\n• Tap "API" next to Logout and enter this computer's IPv4 (e.g. 192.168.1.x) + port 5001 — no APK rebuild needed`;
   }
 
