@@ -6,6 +6,7 @@ import multer from 'multer';
 import Banner from '../models/Banner.js';
 import { verifyAdminToken } from '../middleware/adminAuth.middleware.js';
 import { logger } from '../config/logger.js';
+import { isCloudinaryEnabled, uploadImageBuffer } from '../config/cloudinary.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadsDir = path.join(__dirname, '../../uploads/banners');
@@ -13,16 +14,8 @@ fs.mkdirSync(uploadsDir, { recursive: true });
 
 const router = express.Router();
 
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadsDir),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname || '') || '.jpg';
-    cb(null, `banner-${Date.now()}${ext.toLowerCase()}`);
-  },
-});
-
 const uploadPoster = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 4 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     if (/^image\/(jpeg|jpg|png|webp)$/i.test(file.mimetype)) {
@@ -74,7 +67,7 @@ router.get('/', async (_req, res) => {
   }
 });
 
-/** Upload poster asset (saved under /uploads/banners/). */
+/** Upload poster asset (prefers Cloudinary, falls back to local disk). */
 router.post(
   '/upload',
   verifyAdminToken,
@@ -87,18 +80,36 @@ router.post(
       next();
     });
   },
-  (req, res) => {
+  async (req, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ success: false, message: 'Missing image file (field name: image).' });
       }
-      const publicPath = `/uploads/banners/${req.file.filename}`;
-      const base = `${req.protocol}://${req.get('host')}`;
+      let publicPath = '';
+      let url = '';
+      if (isCloudinaryEnabled()) {
+        const uploaded = await uploadImageBuffer(req.file.buffer, {
+          folder: 'aquaboom/banners',
+          transformation: [
+            { width: 1920, height: 640, crop: 'limit' },
+            { quality: 'auto:good' },
+          ],
+        });
+        publicPath = uploaded.url;
+        url = uploaded.url;
+      } else {
+        const ext = path.extname(req.file.originalname || '') || '.jpg';
+        const filename = `banner-${Date.now()}${ext.toLowerCase()}`;
+        await fs.promises.writeFile(path.join(uploadsDir, filename), req.file.buffer);
+        publicPath = `/uploads/banners/${filename}`;
+        const base = `${req.protocol}://${req.get('host')}`;
+        url = `${base}${publicPath}`;
+      }
       res.json({
         success: true,
         data: {
           path: publicPath,
-          url: `${base}${publicPath}`,
+          url,
         },
       });
     } catch (error) {

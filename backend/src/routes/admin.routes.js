@@ -21,6 +21,7 @@ import {
   startOfIndianCalendarDay,
 } from '../utils/indianTime.js';
 import { resizeProductPhotoBuffer, PRODUCT_IMAGE_MAX } from '../utils/processProductImage.js';
+import { isCloudinaryEnabled, uploadImageBuffer } from '../config/cloudinary.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const productsImgDir = path.join(__dirname, '../../uploads/products');
@@ -419,7 +420,7 @@ router.delete('/agents/:agentId', verifyAdminToken, async (req, res) => {
 
 // ==================== PRODUCT MANAGEMENT ====================
 
-/** Upload product photo → resized square JPEG (stores under /uploads/products). */
+/** Upload product photo → resized square JPEG (prefers Cloudinary, falls back to /uploads/products). */
 router.post(
   '/products/upload-image',
   verifyAdminToken,
@@ -443,15 +444,31 @@ router.post(
         });
       }
       const resized = await resizeProductPhotoBuffer(req.file.buffer);
-      const filename = `product-${Date.now()}.jpg`;
-      await fs.promises.writeFile(path.join(productsImgDir, filename), resized);
-      const publicPath = `/uploads/products/${filename}`;
-      const base = `${req.protocol}://${req.get('host')}`;
+      let publicPath = '';
+      let publicUrl = '';
+      if (isCloudinaryEnabled()) {
+        const uploaded = await uploadImageBuffer(resized, {
+          folder: 'aquaboom/products',
+          format: 'jpg',
+          transformation: [
+            { width: PRODUCT_IMAGE_MAX, height: PRODUCT_IMAGE_MAX, crop: 'fill' },
+            { quality: 'auto:good' },
+          ],
+        });
+        publicPath = uploaded.url;
+        publicUrl = uploaded.url;
+      } else {
+        const filename = `product-${Date.now()}.jpg`;
+        await fs.promises.writeFile(path.join(productsImgDir, filename), resized);
+        publicPath = `/uploads/products/${filename}`;
+        const base = `${req.protocol}://${req.get('host')}`;
+        publicUrl = `${base}${publicPath}`;
+      }
       res.json({
         success: true,
         data: {
           path: publicPath,
-          url: `${base}${publicPath}`,
+          url: publicUrl,
           width: PRODUCT_IMAGE_MAX,
           height: PRODUCT_IMAGE_MAX,
           format: 'jpeg',

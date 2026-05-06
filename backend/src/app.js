@@ -16,6 +16,7 @@ import connectDB from './config/db.js';
 import { logger } from './config/logger.js';
 import { initializeFirebase } from './config/firebase.js';
 import { initializeRazorpay } from './config/razorpay.js';
+import { initializeCloudinary } from './config/cloudinary.js';
 
 // Import routes
 import authRoutes from './routes/auth.routes.js';
@@ -216,6 +217,9 @@ const startServer = async () => {
 
     // Initialize Razorpay
     initializeRazorpay();
+
+    // Initialize Cloudinary (optional for hosted image storage)
+    initializeCloudinary();
 
     // Start HTTP server
     server.listen(PORT, '0.0.0.0', () => {
