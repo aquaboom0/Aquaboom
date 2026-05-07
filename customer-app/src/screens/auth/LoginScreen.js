@@ -10,15 +10,12 @@ import {
   Alert,
   ActivityIndicator,
   ScrollView,
-  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useDispatch, useSelector } from 'react-redux';
 import { loginUnified, clearError } from '../../store/slices/authSlice';
 import { COLORS, SPACE, RADII } from '../../config';
-
-const LOGIN_BACKGROUND = require('../../../assets/login-light-bg.jpg');
 
 const LoginScreen = ({ navigation }) => {
   const [email, setEmail] = useState('');
@@ -68,8 +65,6 @@ const LoginScreen = ({ navigation }) => {
         end={{ x: 0.5, y: 1 }}
         style={StyleSheet.absoluteFill}
       />
-      <Image source={LOGIN_BACKGROUND} style={styles.backgroundImage} resizeMode="cover" />
-      <View style={styles.backgroundWash} />
 
       <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
         <KeyboardAvoidingView
@@ -161,14 +156,6 @@ const styles = StyleSheet.create({
   },
   safe: {
     flex: 1,
-  },
-  backgroundImage: {
-    ...StyleSheet.absoluteFillObject,
-    opacity: 0.13,
-  },
-  backgroundWash: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255,255,255,0.58)',
   },
   keyboardView: {
     flex: 1,

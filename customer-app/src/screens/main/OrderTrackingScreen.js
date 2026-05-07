@@ -272,7 +272,15 @@ const OrderTrackingScreen = ({ route, navigation }) => {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
+        <TouchableOpacity
+          onPress={() => {
+            if (navigation.canGoBack()) {
+              navigation.goBack();
+            } else {
+              navigation.navigate('Orders');
+            }
+          }}
+        >
           <Text style={styles.back}>←</Text>
         </TouchableOpacity>
         <Text style={styles.title}>Track Order</Text>
