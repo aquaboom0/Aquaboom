@@ -806,20 +806,39 @@ const AdminDashboardScreen = () => {
   };
 
   const applyApiEndpointAndReconnect = async () => {
-    const h = apiHostInput.trim();
+    const rawHost = apiHostInput.trim();
     try {
-      if (!h) {
+      if (!rawHost) {
         await clearEndpointOverride();
       } else {
-        const protocolHint = /\.onrender\.com$/i.test(h) ? 'https' : '';
-        await persistEndpointOverride(h, apiPortInput, protocolHint);
+        // Accept "host", "host:port", "host/api", or full URL and normalize to clean host+port.
+        const hostCandidate = rawHost.replace(/\/+$/, '');
+        const hasScheme = /^https?:\/\//i.test(hostCandidate);
+        const parseTarget =
+          hasScheme
+            ? hostCandidate
+            : `https://${hostCandidate.replace(/^\/+/, '')}`;
+        const parsed = new URL(parseTarget);
+        const normalizedHost = parsed.hostname;
+        const inferredProtocol = parsed.protocol.replace(':', '');
+        const normalizedPort =
+          String(apiPortInput || '').trim() ||
+          (parsed.port ? String(parsed.port) : inferredProtocol === 'http' ? '5001' : '443');
+        const protocolHint =
+          inferredProtocol || (/\.onrender\.com$/i.test(normalizedHost) ? 'https' : '');
+
+        await persistEndpointOverride(normalizedHost, normalizedPort, protocolHint);
+        setApiHostInput(normalizedHost);
+        setApiPortInput(normalizedPort);
       }
       setApiModalVisible(false);
       dispatch(disconnectSocket(undefined));
       await dispatch(connectSocket(null));
       Alert.alert(
-        !h ? 'API address' : 'API updated',
-        !h ? 'Using the URL baked into this app install.' : `Using ${getApiBaseUrlSync()}\nPoster uploads use this immediately — no reinstall.`
+        !rawHost ? 'API address' : 'API updated',
+        !rawHost
+          ? 'Using the URL baked into this app install.'
+          : `Using ${getApiBaseUrlSync()}\nPoster uploads use this immediately — no reinstall.`
       );
       loadTabData();
     } catch {
