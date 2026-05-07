@@ -1,13 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { Search, Package, Plus, Edit2, Trash2, Eye } from 'lucide-react';
-import { fetchProducts, deleteProduct, createProduct, updateProduct } from '../store/slices/productSlice';
+import { Search, Package, Plus, Edit2, Trash2, Eye, Upload } from 'lucide-react';
+import { 
+  fetchProducts, 
+  deleteProduct, 
+  createProduct, 
+  updateProduct,
+  uploadProductImage,
+  clearUploadedImage
+} from '../store/slices/productSlice';
 import { COLORS } from '../config';
 import './Products.css';
 
 const Products = () => {
   const dispatch = useDispatch();
-  const { products, totalPages, currentPage, loading } = useSelector(state => state.products);
+  const { products, totalPages, currentPage, loading, uploadingImage, uploadedImage } = useSelector(state => state.products);
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [showModal, setShowModal] = useState(false);
@@ -20,10 +27,28 @@ const Products = () => {
     category: '',
     imageUrl: ''
   });
+  const [imageFile, setImageFile] = useState(null);
 
   useEffect(() => {
     dispatch(fetchProducts({ page: 1 }));
   }, [dispatch]);
+
+  useEffect(() => {
+    if (uploadedImage) {
+      setFormData(prev => ({
+        ...prev,
+        imageUrl: uploadedImage.url || uploadedImage.path
+      }));
+    }
+  }, [uploadedImage]);
+
+  const handleImageSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setImageFile(file);
+      dispatch(uploadProductImage(file));
+    }
+  };
 
   const handleSearch = (e) => {
     e.preventDefault();
@@ -63,12 +88,16 @@ const Products = () => {
         imageUrl: ''
       });
     }
+    setImageFile(null);
+    dispatch(clearUploadedImage());
     setShowModal(true);
   };
 
   const handleCloseModal = () => {
     setShowModal(false);
     setEditingProduct(null);
+    setImageFile(null);
+    dispatch(clearUploadedImage());
     setFormData({
       name: '',
       description: '',
@@ -291,20 +320,46 @@ const Products = () => {
               </div>
 
               <div className="form-group">
-                <label>Image URL</label>
-                <input
-                  type="url"
-                  value={formData.imageUrl}
-                  onChange={(e) => setFormData({...formData, imageUrl: e.target.value})}
-                  placeholder="https://example.com/image.jpg"
-                />
+                <label>Product Image</label>
+                <div className="file-upload-wrapper">
+                  <input
+                    type="file"
+                    id="product-image"
+                    accept="image/jpeg,image/jpg,image/png,image/webp"
+                    onChange={handleImageSelect}
+                    disabled={uploadingImage}
+                  />
+                  <label htmlFor="product-image" className="file-upload-label">
+                    {uploadingImage ? (
+                      <>
+                        <span className="spinner"></span>
+                        Uploading...
+                      </>
+                    ) : uploadedImage ? (
+                      <>
+                        <span className="check-icon">✓</span>
+                        Image uploaded
+                      </>
+                    ) : (
+                      <>
+                        <Upload size={20} />
+                        Click to upload or drag & drop
+                      </>
+                    )}
+                  </label>
+                </div>
+                {formData.imageUrl && (
+                  <div className="image-preview">
+                    <img src={formData.imageUrl} alt="Preview" />
+                  </div>
+                )}
               </div>
 
               <div className="modal-actions">
                 <button type="button" className="cancel-btn" onClick={handleCloseModal}>
                   Cancel
                 </button>
-                <button type="submit" className="submit-btn">
+                <button type="submit" className="submit-btn" disabled={!formData.imageUrl}>
                   {editingProduct ? 'Update' : 'Create'}
                 </button>
               </div>

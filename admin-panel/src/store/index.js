@@ -4,6 +4,7 @@ import orderReducer from './slices/orderSlice';
 import customerReducer from './slices/customerSlice';
 import agentReducer from './slices/agentSlice';
 import productReducer from './slices/productSlice';
+import bannerReducer from './slices/bannerSlice';
 import analyticsReducer from './slices/analyticsSlice';
 
 export const store = configureStore({
@@ -13,6 +14,7 @@ export const store = configureStore({
     customers: customerReducer,
     agents: agentReducer,
     products: productReducer,
+    banners: bannerReducer,
     analytics: analyticsReducer,
   },
   middleware: (getDefaultMiddleware) =>

@@ -75,6 +75,25 @@ export const deleteProduct = createAsyncThunk(
   }
 );
 
+export const uploadProductImage = createAsyncThunk(
+  'products/uploadImage',
+  async (file, { rejectWithValue }) => {
+    try {
+      const formData = new FormData();
+      formData.append('image', file);
+
+      const response = await api.post('/admin/products/upload-image', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      return response.data.data;
+    } catch (error) {
+      return rejectWithValue(error.response?.data?.message || 'Failed to upload image');
+    }
+  }
+);
+
 const productSlice = createSlice({
   name: 'products',
   initialState: {
@@ -84,6 +103,8 @@ const productSlice = createSlice({
     currentPage: 1,
     loading: false,
     error: null,
+    uploadingImage: false,
+    uploadedImage: null,
     filters: {
       category: '',
       search: '',
@@ -98,6 +119,9 @@ const productSlice = createSlice({
     },
     clearError: (state) => {
       state.error = null;
+    },
+    clearUploadedImage: (state) => {
+      state.uploadedImage = null;
     },
   },
   extraReducers: (builder) => {
@@ -142,9 +166,21 @@ const productSlice = createSlice({
       })
       .addCase(deleteProduct.fulfilled, (state, action) => {
         state.products = state.products.filter(p => p._id !== action.payload);
+      })
+      .addCase(uploadProductImage.pending, (state) => {
+        state.uploadingImage = true;
+        state.error = null;
+      })
+      .addCase(uploadProductImage.fulfilled, (state, action) => {
+        state.uploadingImage = false;
+        state.uploadedImage = action.payload;
+      })
+      .addCase(uploadProductImage.rejected, (state, action) => {
+        state.uploadingImage = false;
+        state.error = action.payload;
       });
   },
 });
 
-export const { setFilters, clearCurrentProduct, clearError } = productSlice.actions;
+export const { setFilters, clearCurrentProduct, clearError, clearUploadedImage } = productSlice.actions;
 export default productSlice.reducer;

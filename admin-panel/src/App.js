@@ -10,6 +10,7 @@ import OrderDetail from './pages/OrderDetail';
 import Customers from './pages/Customers';
 import DeliveryAgents from './pages/DeliveryAgents';
 import Products from './pages/Products';
+import Posters from './pages/Posters';
 import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
 import PrivateRoute from './components/PrivateRoute';
@@ -28,6 +29,7 @@ function App() {
             <Route path="customers" element={<Customers />} />
             <Route path="agents" element={<DeliveryAgents />} />
             <Route path="products" element={<Products />} />
+            <Route path="posters" element={<Posters />} />
             <Route path="analytics" element={<Analytics />} />
             <Route path="settings" element={<Settings />} />
           </Route>

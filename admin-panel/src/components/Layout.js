@@ -11,7 +11,8 @@ import {
   Settings, 
   LogOut,
   Menu,
-  X
+  X,
+  Image
 } from 'lucide-react';
 import { logout } from '../../store/slices/authSlice';
 import { COLORS } from '../../config';
@@ -23,6 +24,7 @@ const menuItems = [
   { path: '/customers', icon: Users, label: 'Customers' },
   { path: '/agents', icon: Truck, label: 'Delivery Agents' },
   { path: '/products', icon: Package, label: 'Products' },
+  { path: '/posters', icon: Image, label: 'Posters' },
   { path: '/analytics', icon: BarChart3, label: 'Analytics' },
   { path: '/settings', icon: Settings, label: 'Settings' },
 ];
