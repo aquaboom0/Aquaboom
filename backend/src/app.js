@@ -73,6 +73,7 @@ function socketCorsOriginSetting() {
 // Initialize express
 const app = express();
 const server = http.createServer(app);
+app.set('trust proxy', 1);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadsRoot = path.join(__dirname, '../uploads');
@@ -118,15 +119,35 @@ app.use(cors({
 }));
 
 // Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: {
-    success: false,
-    message: 'Too many requests, please try again later.',
-  },
+const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000);
+const API_RATE_LIMIT_MAX = Number(process.env.API_RATE_LIMIT_MAX || 1200);
+const AUTH_RATE_LIMIT_MAX = Number(process.env.AUTH_RATE_LIMIT_MAX || 120);
+
+const rateLimitMessage = {
+  success: false,
+  message: 'Too many requests, please try again later.',
+};
+
+// Keep tighter limits for login/auth endpoints to reduce abuse.
+const authLimiter = rateLimit({
+  windowMs: RATE_LIMIT_WINDOW_MS,
+  max: AUTH_RATE_LIMIT_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: rateLimitMessage,
 });
-app.use('/api', limiter);
+
+// Broader limit for app traffic (tracking polls, dashboard refreshes, etc).
+const apiLimiter = rateLimit({
+  windowMs: RATE_LIMIT_WINDOW_MS,
+  max: API_RATE_LIMIT_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: rateLimitMessage,
+});
+
+app.use('/api/auth', authLimiter);
+app.use('/api', apiLimiter);
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
