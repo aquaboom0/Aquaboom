@@ -64,6 +64,17 @@ api.interceptors.response.use(
   }
 );
 
+async function warmRenderIfNeeded() {
+  const base = String(getApiBaseUrlSync() || '');
+  if (!/\.onrender\.com/i.test(base)) return;
+  const origin = base.replace(/\/api\/?$/i, '');
+  try {
+    await axios.get(`${origin}/health`, { timeout: 90000 });
+  } catch (_) {
+    // Best effort warm-up only.
+  }
+}
+
 // Auth API
 export const authAPI = {
   // Login with email/password
@@ -121,13 +132,18 @@ export const adminAPI = {
   approveOrder: (orderId) => api.post(`/admin/orders/${orderId}/approve`),
   declineOrder: (orderId, reason) => api.post(`/admin/orders/${orderId}/decline`, { reason }),
   getProducts: () => api.get('/admin/products'),
-  uploadProductImage: (formData) =>
-    api.post('/admin/products/upload-image', formData, { timeout: 120000 }),
+  uploadProductImage: async (formData) => {
+    await warmRenderIfNeeded();
+    return api.post('/admin/products/upload-image', formData, { timeout: 120000 });
+  },
   createProduct: (data) => api.post('/admin/products', data),
   updateProduct: (id, data) => api.put(`/admin/products/${id}`, data),
   deleteProduct: (id) => api.delete(`/admin/products/${id}`),
   getAdminBanners: () => api.get('/banners/admin'),
-  uploadBannerImage: (formData) => api.post('/banners/upload', formData, { timeout: 120000 }),
+  uploadBannerImage: async (formData) => {
+    await warmRenderIfNeeded();
+    return api.post('/banners/upload', formData, { timeout: 120000 });
+  },
   createBanner: (payload) => api.post('/banners/', payload),
   updateBanner: (bannerId, payload) => api.put(`/banners/${bannerId}`, payload),
   deleteBanner: (bannerId) => api.delete(`/banners/${bannerId}`),
