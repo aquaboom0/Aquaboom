@@ -444,25 +444,37 @@ router.post(
         });
       }
       const resized = await resizeProductPhotoBuffer(req.file.buffer);
+      const persistLocal = async () => {
+        const filename = `product-${Date.now()}.jpg`;
+        await fs.promises.writeFile(path.join(productsImgDir, filename), resized);
+        const publicPath = `/uploads/products/${filename}`;
+        const base = `${req.protocol}://${req.get('host')}`;
+        return { publicPath, publicUrl: `${base}${publicPath}` };
+      };
       let publicPath = '';
       let publicUrl = '';
       if (isCloudinaryEnabled()) {
-        const uploaded = await uploadImageBuffer(resized, {
-          folder: 'aquaboom/products',
-          format: 'jpg',
-          transformation: [
-            { width: PRODUCT_IMAGE_MAX, height: PRODUCT_IMAGE_MAX, crop: 'fill' },
-            { quality: 'auto:good' },
-          ],
-        });
-        publicPath = uploaded.url;
-        publicUrl = uploaded.url;
+        try {
+          const uploaded = await uploadImageBuffer(resized, {
+            folder: 'aquaboom/products',
+            format: 'jpg',
+            transformation: [
+              { width: PRODUCT_IMAGE_MAX, height: PRODUCT_IMAGE_MAX, crop: 'fill' },
+              { quality: 'auto:good' },
+            ],
+          });
+          publicPath = uploaded.url;
+          publicUrl = uploaded.url;
+        } catch (cloudErr) {
+          logger.error(`Product upload Cloudinary failed, using local fallback: ${cloudErr.message}`);
+          const local = await persistLocal();
+          publicPath = local.publicPath;
+          publicUrl = local.publicUrl;
+        }
       } else {
-        const filename = `product-${Date.now()}.jpg`;
-        await fs.promises.writeFile(path.join(productsImgDir, filename), resized);
-        publicPath = `/uploads/products/${filename}`;
-        const base = `${req.protocol}://${req.get('host')}`;
-        publicUrl = `${base}${publicPath}`;
+        const local = await persistLocal();
+        publicPath = local.publicPath;
+        publicUrl = local.publicUrl;
       }
       res.json({
         success: true,

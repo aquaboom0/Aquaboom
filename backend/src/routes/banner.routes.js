@@ -85,25 +85,38 @@ router.post(
       if (!req.file) {
         return res.status(400).json({ success: false, message: 'Missing image file (field name: image).' });
       }
-      let publicPath = '';
-      let url = '';
-      if (isCloudinaryEnabled()) {
-        const uploaded = await uploadImageBuffer(req.file.buffer, {
-          folder: 'aquaboom/banners',
-          transformation: [
-            { width: 1920, height: 640, crop: 'limit' },
-            { quality: 'auto:good' },
-          ],
-        });
-        publicPath = uploaded.url;
-        url = uploaded.url;
-      } else {
+      const persistLocal = async () => {
         const ext = path.extname(req.file.originalname || '') || '.jpg';
         const filename = `banner-${Date.now()}${ext.toLowerCase()}`;
         await fs.promises.writeFile(path.join(uploadsDir, filename), req.file.buffer);
-        publicPath = `/uploads/banners/${filename}`;
+        const publicPath = `/uploads/banners/${filename}`;
         const base = `${req.protocol}://${req.get('host')}`;
-        url = `${base}${publicPath}`;
+        return { publicPath, url: `${base}${publicPath}` };
+      };
+
+      let publicPath = '';
+      let url = '';
+      if (isCloudinaryEnabled()) {
+        try {
+          const uploaded = await uploadImageBuffer(req.file.buffer, {
+            folder: 'aquaboom/banners',
+            transformation: [
+              { width: 1920, height: 640, crop: 'limit' },
+              { quality: 'auto:good' },
+            ],
+          });
+          publicPath = uploaded.url;
+          url = uploaded.url;
+        } catch (cloudErr) {
+          logger.error(`Banner upload Cloudinary failed, using local fallback: ${cloudErr.message}`);
+          const local = await persistLocal();
+          publicPath = local.publicPath;
+          url = local.url;
+        }
+      } else {
+        const local = await persistLocal();
+        publicPath = local.publicPath;
+        url = local.url;
       }
       res.json({
         success: true,
