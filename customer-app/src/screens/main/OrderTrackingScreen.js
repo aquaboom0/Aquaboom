@@ -151,6 +151,16 @@ const OrderTrackingScreen = ({ route, navigation }) => {
     return () => dispatch(disconnectSocket(orderId));
   }, [dispatch, orderId]);
 
+  // Keep order/agent assignment fresh even if socket misses a join/update.
+  useEffect(() => {
+    if (!orderId) return;
+    const refresh = () => {
+      dispatch(fetchOrderTracking(orderId));
+    };
+    const id = setInterval(refresh, 12000);
+    return () => clearInterval(id);
+  }, [dispatch, orderId]);
+
   useEffect(() => {
     if (!orderId) return;
     const poll = async () => {

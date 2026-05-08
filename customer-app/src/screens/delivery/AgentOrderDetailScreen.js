@@ -8,6 +8,8 @@ import {
   Alert,
   Linking,
   ActivityIndicator,
+  Image,
+  Platform,
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import { WebView } from 'react-native-webview';
@@ -16,6 +18,8 @@ import { deliveryAPI } from '../../services/api';
 import { COLORS } from '../../config';
 import { format } from 'date-fns';
 import { thinCoordinates, coordsForFit } from '../../utils/mapRoute';
+
+const RIDER_MARKER = require('../../../assets/map-delivery-rider.png');
 
 /** @returns {{ latitude: number, longitude: number } | null} */
 function toCoord(lat, lng) {
@@ -91,12 +95,31 @@ export default function AgentOrderDetailScreen({ route, navigation }) {
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (!cancelled) setNavPermission(status === 'granted');
+      if (status !== 'granted') return;
+
+      // Prime marker quickly with cached or one-shot fix before watcher ticks.
+      try {
+        const last = await Location.getLastKnownPositionAsync();
+        const lastCoord = toCoord(last?.coords?.latitude, last?.coords?.longitude);
+        if (!cancelled && lastCoord) setAgentPos(lastCoord);
+      } catch {
+        // ignore
+      }
+      try {
+        const now = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        const current = toCoord(now?.coords?.latitude, now?.coords?.longitude);
+        if (!cancelled && current) setAgentPos(current);
+      } catch {
+        // ignore, watcher below continues trying
+      }
 
       sub = await Location.watchPositionAsync(
         {
-          accuracy: Location.Accuracy.Balanced,
-          distanceInterval: 20,
-          timeInterval: 10000,
+          accuracy: Location.Accuracy.High,
+          distanceInterval: 8,
+          timeInterval: 6000,
         },
         (p) => {
           const c = toCoord(p.coords.latitude, p.coords.longitude);
@@ -358,13 +381,24 @@ export default function AgentOrderDetailScreen({ route, navigation }) {
                     pinColor={COLORS.primaryDark}
                   />
                   {agentPos ? (
-                    <Marker
-                      coordinate={agentPos}
-                      title="Your position"
-                      image={require('../../../assets/map-delivery-rider.png')}
-                      anchor={{ x: 0.5, y: 0.88 }}
-                      tracksViewChanges={false}
-                    />
+                    Platform.OS === 'android' ? (
+                      <Marker
+                        coordinate={agentPos}
+                        title="Your position"
+                        anchor={{ x: 0.5, y: 1 }}
+                        tracksViewChanges={false}
+                      >
+                        <Image source={RIDER_MARKER} style={styles.riderIcon} resizeMode="contain" />
+                      </Marker>
+                    ) : (
+                      <Marker
+                        coordinate={agentPos}
+                        title="Your position"
+                        image={RIDER_MARKER}
+                        anchor={{ x: 0.5, y: 0.88 }}
+                        tracksViewChanges={false}
+                      />
+                    )
                   ) : null}
                   {routeCoords?.length >= 2 ? (
                     <Polyline coordinates={routeCoords} strokeColor={COLORS.primary} strokeWidth={6} />
@@ -545,6 +579,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.border,
     position: 'relative',
   },
+  riderIcon: { width: 48, height: 48 },
   mapWeb: { flex: 1, backgroundColor: '#e2e8f0' },
   mapLoading: {
     ...StyleSheet.absoluteFillObject,

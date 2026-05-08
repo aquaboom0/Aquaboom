@@ -151,20 +151,28 @@ const orderSlice = createSlice({
 
       const idStr = orderId != null ? String(orderId) : '';
 
-      if (state.currentOrder?.assignedAgent && String(state.currentOrder._id) === idStr) {
+      if (state.currentOrder && String(state.currentOrder._id) === idStr) {
+        if (!state.currentOrder.assignedAgent) {
+          // Location updates may arrive before full agent payload; keep a minimal holder.
+          state.currentOrder.assignedAgent = {};
+        }
         state.currentOrder.assignedAgent.currentLocation = loc;
       }
 
       if (state.trackingInfo && String(state.trackingInfo._id ?? '') === idStr) {
-        if (state.trackingInfo.agent) {
-          state.trackingInfo.agent.currentLocation = loc;
+        if (!state.trackingInfo.agent) {
+          state.trackingInfo.agent = {};
         }
+        state.trackingInfo.agent.currentLocation = loc;
       }
 
       const activeIndex = state.activeOrders.findIndex(
         (o) => String(o._id) === idStr
       );
-      if (activeIndex !== -1 && state.activeOrders[activeIndex].assignedAgent) {
+      if (activeIndex !== -1) {
+        if (!state.activeOrders[activeIndex].assignedAgent) {
+          state.activeOrders[activeIndex].assignedAgent = {};
+        }
         state.activeOrders[activeIndex].assignedAgent.currentLocation = loc;
       }
     },
