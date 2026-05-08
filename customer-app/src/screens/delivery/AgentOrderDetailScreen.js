@@ -41,6 +41,16 @@ function formatAddress(a) {
   return [a.line1, a.line2, a.landmark, a.city, a.pincode].filter(Boolean).join(', ');
 }
 
+function latestTrackingCoord(trackingHistory) {
+  if (!Array.isArray(trackingHistory) || trackingHistory.length === 0) return null;
+  for (let i = trackingHistory.length - 1; i >= 0; i -= 1) {
+    const loc = trackingHistory[i]?.location;
+    const c = toCoord(loc?.lat, loc?.lng);
+    if (c) return c;
+  }
+  return null;
+}
+
 export default function AgentOrderDetailScreen({ route, navigation }) {
   const { orderId } = route.params || {};
   const [order, setOrder] = useState(null);
@@ -56,6 +66,10 @@ export default function AgentOrderDetailScreen({ route, navigation }) {
   const dropoffCoord = useMemo(
     () => toCoord(order?.deliveryAddress?.lat, order?.deliveryAddress?.lng),
     [order?.deliveryAddress?.lat, order?.deliveryAddress?.lng]
+  );
+  const historyAgentCoord = useMemo(
+    () => latestTrackingCoord(order?.trackingHistory),
+    [order?.trackingHistory]
   );
 
   const mapsSearchUri = useMemo(() => {
@@ -88,6 +102,12 @@ export default function AgentOrderDetailScreen({ route, navigation }) {
       320
     );
   }, [dropoffCoord, agentPos, routeCoords]);
+
+  useEffect(() => {
+    if (!agentPos && historyAgentCoord) {
+      setAgentPos(historyAgentCoord);
+    }
+  }, [agentPos, historyAgentCoord]);
 
   useEffect(() => {
     let cancelled = false;
@@ -374,12 +394,26 @@ export default function AgentOrderDetailScreen({ route, navigation }) {
                   }}
                   onMapReady={() => fitMapToRoute()}
                 >
-                  <Marker
-                    coordinate={dropoffCoord}
-                    title="Deliver here"
-                    description={formatAddress(order.deliveryAddress)}
-                    pinColor={COLORS.primaryDark}
-                  />
+                  {Platform.OS === 'android' ? (
+                    <Marker
+                      coordinate={dropoffCoord}
+                      title="Deliver here"
+                      description={formatAddress(order.deliveryAddress)}
+                      anchor={{ x: 0.5, y: 1 }}
+                      tracksViewChanges={false}
+                    >
+                      <View style={styles.dropPin}>
+                        <View style={styles.dropPinInner} />
+                      </View>
+                    </Marker>
+                  ) : (
+                    <Marker
+                      coordinate={dropoffCoord}
+                      title="Deliver here"
+                      description={formatAddress(order.deliveryAddress)}
+                      pinColor={COLORS.primaryDark}
+                    />
+                  )}
                   {agentPos ? (
                     Platform.OS === 'android' ? (
                       <Marker
@@ -439,6 +473,12 @@ export default function AgentOrderDetailScreen({ route, navigation }) {
               <Text style={styles.bold}>Navigate</Text> below if the pin looks wrong.
             </Text>
           )}
+          {!agentPos ? (
+            <Text style={styles.mapFallbackNote}>
+              Waiting for your live GPS. Keep location set to <Text style={styles.bold}>Allow all the time</Text> for smooth
+              realtime tracking.
+            </Text>
+          ) : null}
         </View>
 
         <Section title="Delivery address">
@@ -580,6 +620,27 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   riderIcon: { width: 48, height: 48 },
+  dropPin: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: COLORS.primaryDark,
+    borderWidth: 3,
+    borderColor: '#fff',
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 3,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  dropPinInner: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#fff',
+  },
   mapWeb: { flex: 1, backgroundColor: '#e2e8f0' },
   mapLoading: {
     ...StyleSheet.absoluteFillObject,

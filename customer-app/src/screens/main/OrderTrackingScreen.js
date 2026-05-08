@@ -48,6 +48,16 @@ const haversKm = (a, b) => {
   return R * (2 * Math.atan2(Math.sqrt(c), Math.sqrt(1 - c)));
 };
 
+const latestTrackingCoord = (trackingHistory) => {
+  if (!Array.isArray(trackingHistory) || trackingHistory.length === 0) return null;
+  for (let i = trackingHistory.length - 1; i >= 0; i -= 1) {
+    const loc = trackingHistory[i]?.location;
+    const c = toCoord(loc?.lat, loc?.lng);
+    if (c) return c;
+  }
+  return null;
+};
+
 const OrderTrackingScreen = ({ route, navigation }) => {
   const orderId = route?.params?.orderId;
   const dispatch = useDispatch();
@@ -73,17 +83,28 @@ const OrderTrackingScreen = ({ route, navigation }) => {
     return null;
   }, [currentOrder, trackingInfo, orderId]);
 
+  const historyAgent = useMemo(
+    () => latestTrackingCoord(order?.trackingHistory || trackingInfo?.trackingHistory),
+    [order?.trackingHistory, trackingInfo?.trackingHistory]
+  );
+
   const agent = useMemo(() => {
     const lat =
-      order?.assignedAgent?.currentLocation?.lat ?? trackingInfo?.agent?.currentLocation?.lat;
+      order?.assignedAgent?.currentLocation?.lat ??
+      trackingInfo?.agent?.currentLocation?.lat ??
+      historyAgent?.latitude;
     const lng =
-      order?.assignedAgent?.currentLocation?.lng ?? trackingInfo?.agent?.currentLocation?.lng;
+      order?.assignedAgent?.currentLocation?.lng ??
+      trackingInfo?.agent?.currentLocation?.lng ??
+      historyAgent?.longitude;
     return toCoord(lat, lng);
   }, [
     order?.assignedAgent?.currentLocation?.lat,
     order?.assignedAgent?.currentLocation?.lng,
     trackingInfo?.agent?.currentLocation?.lat,
     trackingInfo?.agent?.currentLocation?.lng,
+    historyAgent?.latitude,
+    historyAgent?.longitude,
   ]);
 
   const destination = useMemo(
@@ -374,6 +395,11 @@ const OrderTrackingScreen = ({ route, navigation }) => {
             <Text style={styles.loadingText}>Map data not available yet</Text>
           </View>
         )}
+        <View style={styles.livePill}>
+          <Text style={styles.livePillText}>
+            {agent ? 'Live rider tracking' : 'Waiting for rider location'}
+          </Text>
+        </View>
       </View>
 
       <ScrollView style={styles.sheet} showsVerticalScrollIndicator={false}>
@@ -424,12 +450,29 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     height: 300,
     marginBottom: 12,
+    position: 'relative',
   },
   mapView: { flex: 1, backgroundColor: '#e2e8f0' },
   /** RN Maps Android often ignores Marker `image=` — use bitmap child instead. */
   riderIcon: { width: 48, height: 48 },
   loadingOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#eef2f7' },
   loadingText: { marginTop: 6, fontSize: 12, color: COLORS.textLight },
+  livePill: {
+    position: 'absolute',
+    left: 10,
+    top: 10,
+    backgroundColor: 'rgba(255,255,255,0.94)',
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  livePillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.primaryDark,
+  },
   order: { color: COLORS.text, fontWeight: '700' },
   eta: { marginTop: 6, color: COLORS.primaryDark, fontWeight: '800', fontSize: 20 },
   metaDistance: { marginTop: 4, color: COLORS.textLight, fontSize: 13 },
