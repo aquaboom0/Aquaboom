@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import { View, Text, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, RefreshControl, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, RefreshControl, ScrollView } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import { useDispatch, useSelector } from 'react-redux';
@@ -199,22 +199,40 @@ const DeliveryDashboardScreen = ({ navigation }) => {
     }
   };
 
+  const canPickFromQueue = available && activeCount === 0;
+
   const handlePickQueueOrder = async (qOrder) => {
-    if (!available || activeCount > 0) {
-      Alert.alert('Not available', 'Set yourself Available and finish active deliveries before picking a queued order.');
+    const orderMongoId = qOrder?._id;
+    if (!orderMongoId) {
+      Alert.alert('Error', 'Invalid order. Pull to refresh.');
+      return;
+    }
+    if (!canPickFromQueue) {
+      Alert.alert(
+        'Cannot pick yet',
+        !available
+          ? 'Turn on Available when you are online and ready for new assignments.'
+          : 'Finish or hand off your current active order before picking another from the queue.'
+      );
       return;
     }
     try {
-      setPickingQueueOrderId(qOrder._id);
-      await deliveryAPI.pickQueueOrder(qOrder._id);
+      setPickingQueueOrderId(orderMongoId);
+      await deliveryAPI.pickQueueOrder(orderMongoId);
+      /** Server sets isAvailable=false while you carry the new assignment — stay in sync */
+      setAvailable(false);
+      dispatch(syncAgentFleetStatus({ isOnline: true, isAvailable: false }));
+      await persistAgentAvailability({ isOnline: true, isAvailable: false });
       await Promise.all([
         deliveryAPI.getMyOrders().then((res) => setOrders(res.data?.data || [])),
         deliveryAPI.getQueueOrders({ limit: 50 }).then((res) => setQueueOrders(res.data?.data || [])),
         loadEarningsSummary(),
       ]);
-      Alert.alert('Picked', `Order #${qOrder.orderId} is now assigned to you.`);
+      const label = qOrder.orderId || String(orderMongoId).slice(-6);
+      Alert.alert('Assigned', `Order #${label} is now yours. Open it below to start delivery.`);
     } catch (error) {
-      Alert.alert('Unable to pick', error.response?.data?.message || 'Please refresh and try again.');
+      const msg = error.response?.data?.message || error.message || 'Please refresh and try again.';
+      Alert.alert('Unable to pick', msg);
     } finally {
       setPickingQueueOrderId(null);
     }
@@ -230,6 +248,13 @@ const DeliveryDashboardScreen = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
+      <ScrollView
+        style={styles.scrollRoot}
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator
+      >
       <View style={styles.header}>
         <View>
           <Text style={styles.title}>Delivery Partner</Text>
@@ -249,7 +274,8 @@ const DeliveryDashboardScreen = ({ navigation }) => {
         </View>
         <Text style={styles.earningsHeroAmount}>{rupeeShort(earnings.todayEarnings)}</Text>
         <Text style={styles.earningsHeroLine}>
-          {earnings.todayDeliveries} delivery{earnings.todayDeliveries === 1 ? '' : 'ies'} completed today · sum of{' '}
+          {earnings.todayDeliveries}{' '}
+          {earnings.todayDeliveries === 1 ? 'delivery' : 'deliveries'} completed today · sum of{' '}
           <Text style={styles.earningsHeroBold}>delivery fees</Text> on those orders
         </Text>
         <View style={styles.earningsHeroDivider} />
@@ -315,82 +341,102 @@ const DeliveryDashboardScreen = ({ navigation }) => {
         {queueOrders.length === 0 ? (
           <Text style={styles.queueEmpty}>No queued approved orders right now.</Text>
         ) : (
-          <ScrollView style={styles.queueScroll} nestedScrollEnabled showsVerticalScrollIndicator>
-            {queueOrders.map((q) => (
-              <View key={q._id} style={styles.queueItem}>
+          <View style={styles.queueList}>
+            <Text style={styles.queueScrollHint}>Scroll the screen to see all queued orders · tap Pick to assign to yourself</Text>
+            {queueOrders.map((q, idx) => (
+              <View
+                key={q._id || `queue-${idx}`}
+                style={[styles.queueItem, idx === queueOrders.length - 1 && styles.queueItemLast]}
+              >
                 <Text style={styles.queueItemTitle}>#{q.orderId}</Text>
                 <Text style={styles.queueItemMeta}>
-                  Position {q.queuePosition || '-'} · Rs {q.totalAmount}
+                  Queue #{q.queuePosition || idx + 1} · {rupeeShort(q.totalAmount)}
                 </Text>
                 <Text style={styles.queueItemMeta}>
-                  {q.customer?.name || 'Customer'}{q.deliveryAddress?.city ? ` · ${q.deliveryAddress.city}` : ''}
+                  {q.customer?.name || 'Customer'}
+                  {q.deliveryAddress?.city ? ` · ${q.deliveryAddress.city}` : ''}
                 </Text>
+                {!canPickFromQueue ? (
+                  <Text style={styles.pickHint}>
+                    {!available
+                      ? 'Turn on Available above to pick from the queue.'
+                      : 'Complete your active order first — then you can pick another.'}
+                  </Text>
+                ) : null}
                 <TouchableOpacity
                   style={[
                     styles.pickBtn,
-                    (!available || activeCount > 0 || pickingQueueOrderId === q._id) && styles.pickBtnDisabled,
+                    (!canPickFromQueue || pickingQueueOrderId === q._id) && styles.pickBtnDisabled,
                   ]}
-                  disabled={!available || activeCount > 0 || pickingQueueOrderId === q._id}
+                  disabled={pickingQueueOrderId === q._id}
+                  activeOpacity={0.85}
                   onPress={() => handlePickQueueOrder(q)}
                 >
                   <Text style={styles.pickBtnText}>
-                    {pickingQueueOrderId === q._id ? 'Picking...' : 'Pick This Order'}
+                    {pickingQueueOrderId === q._id ? 'Assigning…' : 'Pick this order'}
                   </Text>
                 </TouchableOpacity>
               </View>
             ))}
-          </ScrollView>
+          </View>
         )}
       </View>
 
+      <Text style={styles.sectionHeading}>Your assignments</Text>
       {loading ? (
-        <ActivityIndicator color={COLORS.primary} style={{ marginTop: 24 }} />
+        <ActivityIndicator color={COLORS.primary} style={{ marginVertical: 20 }} />
+      ) : orders.length === 0 ? (
+        <Text style={styles.empty}>No assigned orders yet. Stay available — new jobs appear here automatically.</Text>
       ) : (
-        <FlatList
-          data={orders}
-          keyExtractor={(item) => item._id}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-          ListEmptyComponent={<Text style={styles.empty}>No assigned orders yet. Stay available — new jobs appear here automatically.</Text>}
-          renderItem={({ item }) => {
-            const nextStatus = NEXT_STATUS[item.status];
-            return (
-              <View style={styles.item}>
+        orders.map((item) => {
+          const nextStatus = NEXT_STATUS[item.status];
+          return (
+            <View key={item._id} style={styles.item}>
+              <TouchableOpacity
+                activeOpacity={0.88}
+                onPress={() =>
+                  navigation.getParent()?.navigate?.('AgentOrderDetail', {
+                    orderId: item._id,
+                  })
+                }
+              >
+                <View style={styles.itemTop}>
+                  <Text style={styles.itemTitle}>Order #{item.orderId}</Text>
+                  <Text style={[styles.statusPill, { color: getStatusColor(item.status) }]}>{item.status}</Text>
+                </View>
+                <Text style={styles.itemMeta}>Amount: Rs {item.totalAmount}</Text>
+              </TouchableOpacity>
+              {nextStatus && (
                 <TouchableOpacity
-                  activeOpacity={0.88}
-                  onPress={() =>
-                    navigation.getParent()?.navigate?.('AgentOrderDetail', {
-                      orderId: item._id,
-                    })
-                  }
+                  style={[styles.actionBtn, updatingOrderId === item._id && { opacity: 0.6 }]}
+                  disabled={updatingOrderId === item._id}
+                  onPress={() => handleNextStatus(item)}
                 >
-                  <View style={styles.itemTop}>
-                    <Text style={styles.itemTitle}>Order #{item.orderId}</Text>
-                    <Text style={[styles.statusPill, { color: getStatusColor(item.status) }]}>{item.status}</Text>
-                  </View>
-                  <Text style={styles.itemMeta}>Amount: Rs {item.totalAmount}</Text>
+                  <Text style={styles.actionBtnText}>
+                    {updatingOrderId === item._id ? 'Updating...' : `Mark as ${nextStatus}`}
+                  </Text>
                 </TouchableOpacity>
-                {nextStatus && (
-                  <TouchableOpacity
-                    style={[styles.actionBtn, updatingOrderId === item._id && { opacity: 0.6 }]}
-                    disabled={updatingOrderId === item._id}
-                    onPress={() => handleNextStatus(item)}
-                  >
-                    <Text style={styles.actionBtnText}>
-                      {updatingOrderId === item._id ? 'Updating...' : `Mark as ${nextStatus}`}
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            );
-          }}
-        />
+              )}
+            </View>
+          );
+        })
       )}
+      </ScrollView>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background, padding: 16 },
+  container: { flex: 1, backgroundColor: COLORS.background },
+  scrollRoot: { flex: 1 },
+  scrollContent: { padding: 16, paddingBottom: 40 },
+  sectionHeading: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: COLORS.text,
+    marginTop: 4,
+    marginBottom: 10,
+  },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   title: { fontSize: 24, fontWeight: '800', color: COLORS.text },
   subtitle: { fontSize: 11, color: COLORS.textLight, marginTop: 4, maxWidth: '88%' },
@@ -460,29 +506,44 @@ const styles = StyleSheet.create({
   },
   queueBadgeText: { color: '#6d28d9', fontSize: 12, fontWeight: '800' },
   queueEmpty: { color: COLORS.textLight, fontSize: 12 },
-  queueScroll: { maxHeight: 250 },
+  queueList: { marginTop: 4 },
+  queueScrollHint: { fontSize: 11, color: COLORS.textLight, marginBottom: 8, lineHeight: 16 },
   queueItem: {
     borderWidth: 1,
     borderColor: COLORS.border,
     borderRadius: 10,
-    padding: 10,
+    padding: 12,
+    marginTop: 10,
+    backgroundColor: COLORS.background,
+  },
+  queueItemLast: {
+    marginBottom: 4,
+    paddingBottom: 14,
+  },
+  pickHint: {
+    fontSize: 11,
+    color: '#b45309',
     marginTop: 8,
+    marginBottom: 4,
+    lineHeight: 16,
   },
   queueItemTitle: { color: COLORS.text, fontWeight: '800', fontSize: 13 },
   queueItemMeta: { color: COLORS.textLight, fontSize: 12, marginTop: 2 },
   pickBtn: {
     marginTop: 10,
     backgroundColor: COLORS.primary,
-    borderRadius: 8,
-    paddingVertical: 8,
+    borderRadius: 10,
+    paddingVertical: 12,
     alignItems: 'center',
+    minHeight: 44,
+    justifyContent: 'center',
   },
   pickBtnDisabled: {
     opacity: 0.55,
   },
   pickBtnText: {
     color: COLORS.surface,
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '800',
   },
   item: { backgroundColor: COLORS.surface, borderRadius: 12, padding: 12, marginBottom: 10 },
