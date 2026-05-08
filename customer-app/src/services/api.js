@@ -64,15 +64,54 @@ api.interceptors.response.use(
   }
 );
 
+function apiOriginForHealthPing() {
+  const base = String(getApiBaseUrlSync() || '');
+  return base.replace(/\/api\/?$/i, '');
+}
+
 async function warmRenderIfNeeded() {
   const base = String(getApiBaseUrlSync() || '');
   if (!/\.onrender\.com/i.test(base)) return;
-  const origin = base.replace(/\/api\/?$/i, '');
+  const origin = apiOriginForHealthPing();
   try {
     await axios.get(`${origin}/health`, { timeout: 90000 });
   } catch (_) {
     // Best effort warm-up only.
   }
+}
+
+function isTransientNetworkFailure(error) {
+  if (!error || error.response) return false;
+  const msg = String(error.message || '');
+  const code = error.code;
+  return (
+    code === 'ECONNABORTED' || code === 'ERR_NETWORK' || msg === 'Network Error' || /network request failed/i.test(msg)
+  );
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Multipart uploads are heavier; extra warm-up retries help Render cold starts and flaky LTE. */
+async function postMultipartWithWarmRetries(urlPath, formData) {
+  const base = String(getApiBaseUrlSync() || '');
+  const isRender = /\.onrender\.com/i.test(base);
+  const maxAttempts = isRender ? 4 : 2;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (isRender) await warmRenderIfNeeded();
+    try {
+      return await api.post(urlPath, formData, {
+        timeout: 120000,
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+      });
+    } catch (err) {
+      if (attempt >= maxAttempts || !isTransientNetworkFailure(err)) throw err;
+      await sleep(isRender ? 3000 + attempt * 1500 : 1200 * attempt);
+    }
+  }
+  throw new Error('Upload retries exhausted');
 }
 
 // Auth API
@@ -132,18 +171,12 @@ export const adminAPI = {
   approveOrder: (orderId) => api.post(`/admin/orders/${orderId}/approve`),
   declineOrder: (orderId, reason) => api.post(`/admin/orders/${orderId}/decline`, { reason }),
   getProducts: () => api.get('/admin/products'),
-  uploadProductImage: async (formData) => {
-    await warmRenderIfNeeded();
-    return api.post('/admin/products/upload-image', formData, { timeout: 120000 });
-  },
+  uploadProductImage: (formData) => postMultipartWithWarmRetries('/admin/products/upload-image', formData),
   createProduct: (data) => api.post('/admin/products', data),
   updateProduct: (id, data) => api.put(`/admin/products/${id}`, data),
   deleteProduct: (id) => api.delete(`/admin/products/${id}`),
   getAdminBanners: () => api.get('/banners/admin'),
-  uploadBannerImage: async (formData) => {
-    await warmRenderIfNeeded();
-    return api.post('/banners/upload', formData, { timeout: 120000 });
-  },
+  uploadBannerImage: (formData) => postMultipartWithWarmRetries('/banners/upload', formData),
   createBanner: (payload) => api.post('/banners/', payload),
   updateBanner: (bannerId, payload) => api.put(`/banners/${bannerId}`, payload),
   deleteBanner: (bannerId) => api.delete(`/banners/${bannerId}`),
