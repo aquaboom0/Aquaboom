@@ -147,6 +147,12 @@ export const authAPI = {
   
   // Register
   register: (userData) => api.post('/auth/register', userData),
+
+  requestPasswordResetCode: (email) => api.post('/auth/forgot-password/request-code', { email }),
+  verifyPasswordResetCode: (email, code) =>
+    api.post('/auth/forgot-password/verify-code', { email, code }),
+  resetPasswordWithCode: (email, newPassword) =>
+    api.post('/auth/forgot-password/reset', { email, newPassword }),
   
   // Get profile
   getProfile: () => api.get('/auth/profile'),
@@ -207,6 +213,7 @@ export const deliveryAPI = {
   getEarningsSummary: () => api.get('/delivery/earnings-summary'),
   getMyOrders: (params) => api.get('/delivery/my-orders', { params }),
   getQueueOrders: (params) => api.get('/delivery/queue-orders', { params }),
+  pickQueueOrder: (orderId) => api.post(`/delivery/queue-orders/${orderId}/pick`),
   getDeliveryOrder: (orderId) => api.get(`/delivery/order/${orderId}`),
   getPendingApproval: () => api.get('/delivery/pending-approval'),
   approveOrder: (orderId) => api.post(`/delivery/order/${orderId}/approve`),

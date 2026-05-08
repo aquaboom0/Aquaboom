@@ -1,5 +1,7 @@
 import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
+import crypto from 'crypto';
+import nodemailer from 'nodemailer';
 import User from '../models/User.js';
 import DeliveryAgent from '../models/DeliveryAgent.js';
 import AdminPushToken from '../models/AdminPushToken.js';
@@ -9,6 +11,8 @@ import { normalizeIndiaMobilePhone } from '../utils/phone.js';
 
 // In-memory OTP storage (use Redis in production)
 const otpStorage = new Map();
+const passwordResetStorage = new Map();
+let cachedResetMailTransporter = null;
 
 /** Maps mongoose / JWT failures to HTTP responses (avoid opaque 500s). */
 function handleCustomerAuthError(error, res, logLabel, fallbackMessage) {
@@ -130,6 +134,80 @@ const sendOTP = async (phone, otp) => {
   logger.info(`OTP for ${phone}: ${otp}`);
   return true;
 };
+
+function normalizeEmailForReset(email) {
+  return String(email || '')
+    .trim()
+    .toLowerCase();
+}
+
+function generateResetCode() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+function hashResetCode(code) {
+  return crypto.createHash('sha256').update(String(code)).digest('hex');
+}
+
+function getPasswordResetExpiryMs() {
+  const minutes = Number(process.env.PASSWORD_RESET_CODE_EXPIRY_MINUTES || 10);
+  const safeMinutes = Number.isFinite(minutes) && minutes > 0 ? minutes : 10;
+  return safeMinutes * 60 * 1000;
+}
+
+async function getResetMailTransporter() {
+  if (cachedResetMailTransporter) return cachedResetMailTransporter;
+  const host = process.env.SMTP_HOST;
+  const port = Number(process.env.SMTP_PORT || 587);
+  const secure = String(process.env.SMTP_SECURE || '').toLowerCase() === 'true' || port === 465;
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+  if (!host || !user || !pass) {
+    return null;
+  }
+  cachedResetMailTransporter = nodemailer.createTransport({
+    host,
+    port,
+    secure,
+    auth: { user, pass },
+  });
+  return cachedResetMailTransporter;
+}
+
+async function sendResetCodeEmail(email, code) {
+  const transporter = await getResetMailTransporter();
+  if (!transporter) {
+    logger.warn(
+      `SMTP not configured. Password reset code for ${email}: ${code} (set SMTP_* env vars to send emails)`
+    );
+    return false;
+  }
+  const appName = process.env.APP_NAME || 'AquaBoom';
+  const from = process.env.SMTP_FROM || process.env.SMTP_USER;
+  await transporter.sendMail({
+    from,
+    to: email,
+    subject: `${appName} password reset code`,
+    text: `Your ${appName} password reset code is ${code}. It expires in ${
+      Number(process.env.PASSWORD_RESET_CODE_EXPIRY_MINUTES || 10) || 10
+    } minutes.`,
+  });
+  return true;
+}
+
+async function resolveResetAccountByEmail(email) {
+  const normalizedEmail = normalizeEmailForReset(email);
+  if (!normalizedEmail) return null;
+  const user = await User.findOne({ email: normalizedEmail });
+  if (user && (!user.role || user.role === 'customer')) {
+    return { entity: user, type: 'customer' };
+  }
+  const agent = await DeliveryAgent.findOne({ email: normalizedEmail });
+  if (agent) {
+    return { entity: agent, type: 'delivery_agent' };
+  }
+  return null;
+}
 
 // Customer: Send OTP
 export const sendCustomerOTP = async (req, res) => {
@@ -659,6 +737,125 @@ export const refreshToken = async (req, res) => {
   }
 };
 
+export const requestPasswordResetCode = async (req, res) => {
+  try {
+    const { email } = req.body;
+    const normalizedEmail = normalizeEmailForReset(email);
+    if (!normalizedEmail) {
+      return res.status(400).json({ success: false, message: 'Email is required.' });
+    }
+
+    const account = await resolveResetAccountByEmail(normalizedEmail);
+    if (!account?.entity?.isActive) {
+      return res.json({
+        success: true,
+        message: 'If this email is registered, a reset code has been sent.',
+      });
+    }
+
+    const resetCode = generateResetCode();
+    passwordResetStorage.set(normalizedEmail, {
+      codeHash: hashResetCode(resetCode),
+      expiresAt: Date.now() + getPasswordResetExpiryMs(),
+      verifiedUntil: 0,
+      accountType: account.type,
+      accountId: String(account.entity._id),
+      attempts: 0,
+    });
+
+    await sendResetCodeEmail(normalizedEmail, resetCode);
+    return res.json({
+      success: true,
+      message: 'If this email is registered, a reset code has been sent.',
+      ...(process.env.NODE_ENV !== 'production' ? { devCode: resetCode } : {}),
+    });
+  } catch (error) {
+    logger.error(`Request password reset code error: ${error.message}`);
+    return res.status(500).json({ success: false, message: 'Failed to send reset code.' });
+  }
+};
+
+export const verifyPasswordResetCode = async (req, res) => {
+  try {
+    const { email, code } = req.body;
+    const normalizedEmail = normalizeEmailForReset(email);
+    const otpCode = String(code || '').trim();
+    if (!normalizedEmail || !otpCode) {
+      return res.status(400).json({ success: false, message: 'Email and code are required.' });
+    }
+    const record = passwordResetStorage.get(normalizedEmail);
+    if (!record) {
+      return res.status(400).json({ success: false, message: 'Reset code not found. Request a new code.' });
+    }
+    if (Date.now() > record.expiresAt) {
+      passwordResetStorage.delete(normalizedEmail);
+      return res.status(400).json({ success: false, message: 'Reset code expired. Request a new code.' });
+    }
+    if (record.attempts >= 5) {
+      passwordResetStorage.delete(normalizedEmail);
+      return res.status(429).json({ success: false, message: 'Too many invalid attempts. Request a new code.' });
+    }
+    if (hashResetCode(otpCode) !== record.codeHash) {
+      record.attempts += 1;
+      passwordResetStorage.set(normalizedEmail, record);
+      return res.status(400).json({ success: false, message: 'Invalid reset code.' });
+    }
+    record.verifiedUntil = Date.now() + 10 * 60 * 1000;
+    passwordResetStorage.set(normalizedEmail, record);
+    return res.json({ success: true, message: 'Code verified. You can now set a new password.' });
+  } catch (error) {
+    logger.error(`Verify password reset code error: ${error.message}`);
+    return res.status(500).json({ success: false, message: 'Failed to verify reset code.' });
+  }
+};
+
+export const resetPasswordWithCode = async (req, res) => {
+  try {
+    const { email, newPassword } = req.body;
+    const normalizedEmail = normalizeEmailForReset(email);
+    const password = String(newPassword || '');
+    if (!normalizedEmail || !password) {
+      return res.status(400).json({ success: false, message: 'Email and new password are required.' });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ success: false, message: 'Password must be at least 6 characters.' });
+    }
+
+    const record = passwordResetStorage.get(normalizedEmail);
+    if (!record) {
+      return res.status(400).json({ success: false, message: 'Reset session not found. Verify code first.' });
+    }
+    if (!record.verifiedUntil || Date.now() > record.verifiedUntil) {
+      passwordResetStorage.delete(normalizedEmail);
+      return res.status(400).json({ success: false, message: 'Reset code verification expired. Verify again.' });
+    }
+
+    if (record.accountType === 'delivery_agent') {
+      const agent = await DeliveryAgent.findOne({ _id: record.accountId, email: normalizedEmail });
+      if (!agent) {
+        passwordResetStorage.delete(normalizedEmail);
+        return res.status(404).json({ success: false, message: 'Account not found.' });
+      }
+      agent.password = password;
+      await agent.save();
+    } else {
+      const user = await User.findOne({ _id: record.accountId, email: normalizedEmail });
+      if (!user) {
+        passwordResetStorage.delete(normalizedEmail);
+        return res.status(404).json({ success: false, message: 'Account not found.' });
+      }
+      user.password = password;
+      await user.save();
+    }
+
+    passwordResetStorage.delete(normalizedEmail);
+    return res.json({ success: true, message: 'Password updated successfully.' });
+  } catch (error) {
+    logger.error(`Reset password with code error: ${error.message}`);
+    return res.status(500).json({ success: false, message: 'Failed to reset password.' });
+  }
+};
+
 // Customer profile
 export const getCustomerProfile = async (req, res) => {
   try {
@@ -984,4 +1181,7 @@ export default {
   agentLogout,
   updateFCMToken,
   updateAdminFCMToken,
+  requestPasswordResetCode,
+  verifyPasswordResetCode,
+  resetPasswordWithCode,
 };

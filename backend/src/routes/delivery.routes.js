@@ -6,7 +6,11 @@ import { exclusiveEndIndianCalendarDay, startOfIndianCalendarDay } from '../util
 import { verifyDeliveryAgentToken } from '../middleware/adminAuth.middleware.js';
 import { freeAgentAfterDelivery, assignNextOrderToAgent, processPendingOrders } from '../services/orderAssignment.service.js';
 import { approvePendingOrder, declinePendingOrder } from '../services/orderApproval.service.js';
-import { notifyCustomerStatusUpdate, getCustomerOrderBannerCopy } from '../services/notification.service.js';
+import {
+  notifyCustomerStatusUpdate,
+  notifyCustomerOrderAssigned,
+  getCustomerOrderBannerCopy,
+} from '../services/notification.service.js';
 import User from '../models/User.js';
 import { logger } from '../config/logger.js';
 import { getDrivingRoute } from '../services/mapsDirections.service.js';
@@ -301,6 +305,119 @@ router.get('/queue-orders', verifyDeliveryAgentToken, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch queued orders.',
+    });
+  }
+});
+
+// Delivery partner manually picks a queued order (FIFO list visible in app).
+router.post('/queue-orders/:orderId/pick', verifyDeliveryAgentToken, async (req, res) => {
+  try {
+    const orderId = req.params.orderId;
+    const io = req.app.get('io');
+
+    const agent = await DeliveryAgent.findOneAndUpdate(
+      {
+        _id: req.agentId,
+        isActive: true,
+        isOnline: true,
+        isAvailable: true,
+        activeOrderId: null,
+      },
+      {
+        $set: {
+          isAvailable: false,
+          activeOrderId: orderId,
+          lastSeen: new Date(),
+        },
+      },
+      { new: true }
+    );
+
+    if (!agent) {
+      return res.status(409).json({
+        success: false,
+        message: 'You can pick queue orders only when online and available.',
+      });
+    }
+
+    const order = await Order.findOneAndUpdate(
+      {
+        _id: orderId,
+        ...queueEligibleMatch,
+      },
+      {
+        $set: {
+          status: 'ASSIGNED',
+          assignedAgent: agent._id,
+          assignedAt: new Date(),
+        },
+        $push: {
+          trackingHistory: {
+            status: 'ASSIGNED',
+            timestamp: new Date(),
+            note: `Picked from queue by ${agent.name}`,
+          },
+        },
+      },
+      { new: true }
+    );
+
+    if (!order) {
+      await DeliveryAgent.findByIdAndUpdate(agent._id, {
+        $set: { isAvailable: true, activeOrderId: null },
+      });
+      return res.status(409).json({
+        success: false,
+        message: 'Order is no longer in queue.',
+      });
+    }
+
+    const customer = await User.findById(order.customer);
+    if (customer) {
+      await notifyCustomerOrderAssigned(order, agent, customer);
+    }
+
+    if (io) {
+      const assignBanner = getCustomerOrderBannerCopy(order, 'ASSIGNED', agent.name);
+      io.to(`customer:${order.customer}`).emit('order:assigned', {
+        order: {
+          _id: order._id,
+          orderId: order.orderId,
+          status: order.status,
+          assignedAt: order.assignedAt,
+        },
+        agent: {
+          _id: agent._id,
+          name: agent.name,
+          phone: agent.phone,
+          vehicleType: agent.vehicleType,
+          vehicleNumber: agent.vehicleNumber,
+        },
+        title: assignBanner?.title,
+        subtitle: assignBanner?.body,
+      });
+      io.to('admin:dashboard').emit('order:assigned', {
+        orderId: order.orderId,
+        agent: agent.name,
+      });
+      io.to('admin:dashboard').emit('order:queuePicked', {
+        orderId: order.orderId,
+        orderMongoId: String(order._id),
+        agentId: String(agent._id),
+        agentName: agent.name,
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Order picked successfully.',
+      data: order,
+    });
+  } catch (error) {
+    logger.error(`Pick queue order error: ${error.message}`);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to pick queued order.',
     });
   }
 });

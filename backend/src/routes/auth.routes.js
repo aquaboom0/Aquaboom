@@ -16,6 +16,9 @@ import {
   agentLogout,
   updateFCMToken,
   updateAdminFCMToken,
+  requestPasswordResetCode,
+  verifyPasswordResetCode,
+  resetPasswordWithCode,
 } from '../controllers/auth.controller.js';
 import { verifyCustomerToken } from '../middleware/auth.middleware.js';
 import { verifyAdminToken, verifyDeliveryAgentToken } from '../middleware/adminAuth.middleware.js';
@@ -28,6 +31,9 @@ router.post('/login', unifiedLogin);
 router.post('/send-otp', sendCustomerOTP);
 router.post('/verify-otp', verifyCustomerOTP);
 router.post('/refresh-token', refreshToken);
+router.post('/forgot-password/request-code', requestPasswordResetCode);
+router.post('/forgot-password/verify-code', verifyPasswordResetCode);
+router.post('/forgot-password/reset', resetPasswordWithCode);
 router.get('/profile', verifyCustomerToken, getCustomerProfile);
 router.put('/profile', verifyCustomerToken, updateCustomerProfile);
 router.post('/address', verifyCustomerToken, addCustomerAddress);

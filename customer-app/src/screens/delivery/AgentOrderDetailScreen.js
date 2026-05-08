@@ -16,6 +16,7 @@ import { COLORS } from '../../config';
 import { format } from 'date-fns';
 import { thinCoordinates } from '../../utils/mapRoute';
 import { buildLeafletTrackingHtml } from '../../utils/leafletMapHtml';
+import { hapticDeliveredSuccess, hapticSuccess } from '../../utils/haptics';
 
 /** @returns {{ latitude: number, longitude: number } | null} */
 function toCoord(lat, lng) {
@@ -283,6 +284,11 @@ export default function AgentOrderDetailScreen({ route, navigation }) {
           try {
             setUpdating(true);
             await deliveryAPI.updateOrderStatus(order._id, next.code);
+            if (next.code === 'DELIVERED') {
+              await hapticDeliveredSuccess();
+            } else {
+              await hapticSuccess();
+            }
             await load();
           } catch (e) {
             Alert.alert('Error', e.response?.data?.message || 'Update failed');

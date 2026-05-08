@@ -18,6 +18,7 @@ import RazorpayCheckout from 'react-native-razorpay';
 import { createOrder, verifyPayment } from '../../store/slices/orderSlice';
 import { clearCart } from '../../store/slices/cartSlice';
 import { COLORS, RAZORPAY_KEY_ID } from '../../config';
+import { hapticSuccess } from '../../utils/haptics';
 
 const CheckoutScreen = ({ route, navigation }) => {
   const { amount, discount, deliveryCharge } = route.params;
@@ -170,6 +171,7 @@ const CheckoutScreen = ({ route, navigation }) => {
         }),
       ]),
     ]).start();
+    hapticSuccess();
   };
 
   const handleCloseConfirmation = () => {
