@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,9 @@ import {
   TextInput,
   Alert,
   ActivityIndicator,
+  Modal,
+  Animated,
+  Easing,
 } from 'react-native';
 import * as Location from 'expo-location';
 import { useDispatch, useSelector } from 'react-redux';
@@ -31,6 +34,12 @@ const CheckoutScreen = ({ route, navigation }) => {
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [currentCoords, setCurrentCoords] = useState(null);
   const [locLoading, setLocLoading] = useState(false);
+  const [confirmVisible, setConfirmVisible] = useState(false);
+  const [confirmTitle, setConfirmTitle] = useState('Order placed');
+  const [confirmBody, setConfirmBody] = useState('');
+  const confirmScale = useRef(new Animated.Value(0.88)).current;
+  const confirmOpacity = useRef(new Animated.Value(0)).current;
+  const tickScale = useRef(new Animated.Value(0.6)).current;
 
   const timeSlots = [
     { id: 'morning', label: 'Morning (8AM - 12PM)', time: '08:00 - 12:00' },
@@ -69,10 +78,9 @@ const CheckoutScreen = ({ route, navigation }) => {
 
     if (paymentMethod === 'cod') {
       dispatch(clearCart());
-      Alert.alert(
-        'Order placed',
-        'Your order is saved instantly. Admin or a delivery partner will confirm it shortly — you will see updates in Orders.',
-        [{ text: 'View orders', onPress: () => navigation.navigate('Orders') }]
+      showOrderConfirmation(
+        'Order placed successfully',
+        'Your order is saved instantly. We will confirm it shortly and keep you updated in My Orders.'
       );
       return;
     }
@@ -113,10 +121,9 @@ const CheckoutScreen = ({ route, navigation }) => {
 
       if (verifyPayment.fulfilled.match(verifyRes)) {
         dispatch(clearCart());
-        Alert.alert(
+        showOrderConfirmation(
           'Payment successful',
-          'We received your payment. Your order is waiting for a quick confirmation from the team.',
-          [{ text: 'Orders', onPress: () => navigation.navigate('Orders') }]
+          'We have received your payment. Your order is now being prepared and will appear in My Orders.'
         );
       } else {
         Alert.alert('Payment Verification Failed', verifyRes.payload || 'Try again');
@@ -124,6 +131,50 @@ const CheckoutScreen = ({ route, navigation }) => {
     } catch (e) {
       Alert.alert('Payment Cancelled', e?.description || 'Payment not completed');
     }
+  };
+
+  const showOrderConfirmation = (title, body) => {
+    setConfirmTitle(title);
+    setConfirmBody(body);
+    setConfirmVisible(true);
+
+    confirmScale.setValue(0.88);
+    confirmOpacity.setValue(0);
+    tickScale.setValue(0.6);
+
+    Animated.parallel([
+      Animated.timing(confirmOpacity, {
+        toValue: 1,
+        duration: 220,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.spring(confirmScale, {
+        toValue: 1,
+        friction: 7,
+        tension: 90,
+        useNativeDriver: true,
+      }),
+      Animated.sequence([
+        Animated.timing(tickScale, {
+          toValue: 1.06,
+          duration: 240,
+          easing: Easing.out(Easing.back(1.5)),
+          useNativeDriver: true,
+        }),
+        Animated.spring(tickScale, {
+          toValue: 1,
+          friction: 7,
+          tension: 120,
+          useNativeDriver: true,
+        }),
+      ]),
+    ]).start();
+  };
+
+  const handleCloseConfirmation = () => {
+    setConfirmVisible(false);
+    navigation.navigate('Orders');
   };
 
   const handleUseCurrentLocation = async () => {
@@ -276,6 +327,34 @@ const CheckoutScreen = ({ route, navigation }) => {
           )}
         </TouchableOpacity>
       </View>
+
+      <Modal
+        visible={confirmVisible}
+        transparent
+        animationType="none"
+        onRequestClose={handleCloseConfirmation}
+      >
+        <View style={styles.confirmBackdrop}>
+          <Animated.View
+            style={[
+              styles.confirmCard,
+              {
+                opacity: confirmOpacity,
+                transform: [{ scale: confirmScale }],
+              },
+            ]}
+          >
+            <Animated.View style={[styles.tickWrap, { transform: [{ scale: tickScale }] }]}>
+              <Text style={styles.tickText}>✓</Text>
+            </Animated.View>
+            <Text style={styles.confirmTitle}>{confirmTitle}</Text>
+            <Text style={styles.confirmBody}>{confirmBody}</Text>
+            <TouchableOpacity style={styles.confirmBtn} onPress={handleCloseConfirmation}>
+              <Text style={styles.confirmBtnText}>View Orders</Text>
+            </TouchableOpacity>
+          </Animated.View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -336,6 +415,72 @@ const styles = StyleSheet.create({
   placeOrderButton: { backgroundColor: COLORS.primary, borderRadius: 12, paddingVertical: 16, alignItems: 'center' },
   buttonDisabled: { opacity: 0.7 },
   placeOrderText: { color: COLORS.surface, fontSize: 18, fontWeight: '600' },
+  confirmBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.42)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  confirmCard: {
+    width: '100%',
+    maxWidth: 360,
+    borderRadius: 20,
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 20,
+    paddingTop: 22,
+    paddingBottom: 16,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 16,
+  },
+  tickWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#dcfce7',
+    borderWidth: 1.5,
+    borderColor: '#86efac',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  tickText: {
+    color: '#16a34a',
+    fontSize: 34,
+    fontWeight: '800',
+    marginTop: -1,
+  },
+  confirmTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#0f172a',
+    textAlign: 'center',
+  },
+  confirmBody: {
+    marginTop: 8,
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#475569',
+    textAlign: 'center',
+  },
+  confirmBtn: {
+    marginTop: 18,
+    width: '100%',
+    borderRadius: 12,
+    backgroundColor: '#16a34a',
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  confirmBtnText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
 });
 
 export default CheckoutScreen;

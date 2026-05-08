@@ -13,6 +13,12 @@ import { getDrivingRoute } from '../services/mapsDirections.service.js';
 
 const router = express.Router();
 
+const queueEligibleMatch = {
+  status: 'AUTO_APPROVED',
+  assignedAgent: null,
+  $or: [{ paymentStatus: 'PAID' }, { paymentMethod: 'COD' }],
+};
+
 /** Order room to receive live agent GPS (customer map). Prefer out-for-delivery, else latest assigned/picked up. */
 async function getAgentLiveTrackingOrder(agentId) {
   const ofd = await Order.findOne({
@@ -271,9 +277,7 @@ router.get('/queue-orders', verifyDeliveryAgentToken, async (req, res) => {
     const safeLimit = Math.max(1, Math.min(100, Number(limit) || 25));
 
     const queued = await Order.find({
-      status: 'AUTO_APPROVED',
-      assignedAgent: null,
-      paymentStatus: 'PAID',
+      ...queueEligibleMatch,
     })
       .populate('customer', 'name phone')
       .sort({ createdAt: 1 })

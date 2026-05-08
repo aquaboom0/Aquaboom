@@ -75,6 +75,19 @@ const OrdersScreen = ({ navigation }) => {
     });
   };
 
+  const resolveAddress = (deliveryAddress) => {
+    if (!deliveryAddress) return 'Not specified';
+    if (deliveryAddress.fullAddress) return deliveryAddress.fullAddress;
+    const parts = [
+      deliveryAddress.line1,
+      deliveryAddress.line2,
+      deliveryAddress.landmark,
+      deliveryAddress.city,
+      deliveryAddress.pincode,
+    ].filter(Boolean);
+    return parts.length ? parts.join(', ') : 'Not specified';
+  };
+
   const renderOrderItem = ({ item }) => (
     <TouchableOpacity 
       style={styles.orderCard}
@@ -107,7 +120,7 @@ const OrdersScreen = ({ navigation }) => {
         <View>
           <Text style={styles.deliveryLabel}>Delivery Address</Text>
           <Text style={styles.deliveryAddress} numberOfLines={1}>
-            {item.deliveryAddress?.fullAddress || 'Not specified'}
+            {resolveAddress(item.deliveryAddress)}
           </Text>
         </View>
         <View style={styles.amountContainer}>

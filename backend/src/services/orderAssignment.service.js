@@ -10,6 +10,12 @@ import {
 } from '../utils/orderLocationPush.js';
 import { logger } from '../config/logger.js';
 
+const queueEligibleMatch = {
+  status: 'AUTO_APPROVED',
+  assignedAgent: null,
+  $or: [{ paymentStatus: 'PAID' }, { paymentMethod: 'COD' }],
+};
+
 // Haversine formula to calculate distance between two coordinates
 const calculateDistance = (lat1, lng1, lat2, lng2) => {
   const R = 6371; // Earth's radius in km
@@ -212,9 +218,7 @@ export const assignNextOrderToAgent = async (agentId, io) => {
     }
 
     const nextOrder = await Order.findOne({
-      status: 'AUTO_APPROVED',
-      assignedAgent: null,
-      paymentStatus: 'PAID',
+      ...queueEligibleMatch,
     }).sort({ createdAt: 1 });
 
     if (!nextOrder) return null;
@@ -352,9 +356,7 @@ export const reassignOrder = async (orderId, io) => {
 export const processPendingOrders = async (io) => {
   try {
     const pendingOrders = await Order.find({
-      status: 'AUTO_APPROVED',
-      assignedAgent: null,
-      paymentStatus: 'PAID',
+      ...queueEligibleMatch,
     }).sort({ createdAt: 1 });
 
     for (const order of pendingOrders) {

@@ -178,19 +178,6 @@ const HomeScreen = ({ navigation }) => {
           <Text style={styles.greeting}>Hello, {user?.name?.split?.(' ')?.[0] || 'there'} 👋</Text>
           <Text style={styles.location}>Delivering to · Home</Text>
         </View>
-        <TouchableOpacity 
-          style={styles.cartButton}
-          onPress={() => navigation.navigate('Cart')}
-        >
-          <Text style={styles.cartIcon}>🛒</Text>
-          {cartItems.length > 0 && (
-            <View style={styles.cartBadge}>
-              <Text style={styles.cartBadgeText}>
-                {cartItems.reduce((sum, item) => sum + item.quantity, 0)}
-              </Text>
-            </View>
-          )}
-        </TouchableOpacity>
       </View>
 
       <ScrollView 
@@ -306,38 +293,6 @@ const styles = StyleSheet.create({
     color: COLORS.textLight,
     marginTop: 5,
     letterSpacing: 0.15,
-  },
-  cartButton: {
-    width: 48,
-    height: 48,
-    borderRadius: RADII.pill,
-    backgroundColor: COLORS.surfaceMuted,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  cartIcon: {
-    fontSize: 24,
-  },
-  cartBadge: {
-    position: 'absolute',
-    top: -2,
-    right: -2,
-    backgroundColor: COLORS.primaryDark,
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 6,
-    borderWidth: 2,
-    borderColor: COLORS.surface,
-  },
-  cartBadgeText: {
-    color: COLORS.surface,
-    fontSize: 12,
-    fontWeight: 'bold',
   },
   section: {
     marginTop: SPACE.lg,
