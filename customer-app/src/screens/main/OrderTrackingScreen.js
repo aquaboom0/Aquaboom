@@ -9,9 +9,9 @@ import {
   Linking,
   Alert,
   Image,
-  Platform,
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
+import { WebView } from 'react-native-webview';
 import { useDispatch, useSelector } from 'react-redux';
 import {
   fetchOrderDetails,
@@ -23,7 +23,7 @@ import { trackingAPI } from '../../services/api';
 import { COLORS } from '../../config';
 import { coordsForFit, thinCoordinates } from '../../utils/mapRoute';
 
-const RIDER_MARKER = require('../../../assets/map-delivery-rider.png');
+const LIVE_TRACKER_ICON = require('../../../assets/map-live-truck.png');
 
 const toCoord = (lat, lng) => {
   const latitude = Number(lat);
@@ -58,6 +58,19 @@ const latestTrackingCoord = (trackingHistory) => {
   return null;
 };
 
+const toGoogleMapsUri = (origin, dest, destText) => {
+  if (origin && dest) {
+    return `https://www.google.com/maps/dir/?api=1&origin=${origin.latitude},${origin.longitude}&destination=${dest.latitude},${dest.longitude}&travelmode=driving`;
+  }
+  if (dest) {
+    return `https://www.google.com/maps/dir/?api=1&destination=${dest.latitude},${dest.longitude}&travelmode=driving`;
+  }
+  if (destText) {
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(destText)}`;
+  }
+  return 'https://www.google.com/maps/search/?api=1&query=India';
+};
+
 const OrderTrackingScreen = ({ route, navigation }) => {
   const orderId = route?.params?.orderId;
   const dispatch = useDispatch();
@@ -68,6 +81,8 @@ const OrderTrackingScreen = ({ route, navigation }) => {
   const [routeCoords, setRouteCoords] = useState([]);
   const [routeLoading, setRouteLoading] = useState(false);
   const [driveMeta, setDriveMeta] = useState(null);
+  const [nativeMapLoaded, setNativeMapLoaded] = useState(false);
+  const [mapLoadGracePassed, setMapLoadGracePassed] = useState(false);
   const mapRef = useRef(null);
 
   const order = useMemo(() => {
@@ -270,6 +285,13 @@ const OrderTrackingScreen = ({ route, navigation }) => {
     return () => clearTimeout(t);
   }, [routeCoords, fitCamera]);
 
+  useEffect(() => {
+    setNativeMapLoaded(false);
+    setMapLoadGracePassed(false);
+    const t = setTimeout(() => setMapLoadGracePassed(true), 4500);
+    return () => clearTimeout(t);
+  }, [orderId]);
+
   const openExternalMap = async () => {
     try {
       let url = '';
@@ -291,6 +313,11 @@ const OrderTrackingScreen = ({ route, navigation }) => {
 
   const centerLat = destination?.latitude || agent?.latitude || 20.5937;
   const centerLng = destination?.longitude || agent?.longitude || 78.9629;
+  const webMapUri = useMemo(
+    () => toGoogleMapsUri(agent, destination, destinationText),
+    [agent, destination, destinationText]
+  );
+  const showFallbackWebMap = (destination || agent) && mapLoadGracePassed && !nativeMapLoaded;
 
   if ((isLoading && !order) || !orderId) {
     return (
@@ -335,7 +362,7 @@ const OrderTrackingScreen = ({ route, navigation }) => {
       </View>
 
       <View style={styles.mapCard}>
-        {(destination || agent) ? (
+        {(destination || agent) && !showFallbackWebMap ? (
           <MapView
             ref={mapRef}
             style={styles.mapView}
@@ -347,40 +374,28 @@ const OrderTrackingScreen = ({ route, navigation }) => {
               longitudeDelta: 0.08,
             }}
             onMapReady={() => fitCamera()}
+            onMapLoaded={() => setNativeMapLoaded(true)}
             showsUserLocation={false}
           >
             {destination ? (
               <Marker coordinate={destination} title="Deliver to you" pinColor={COLORS.primaryDark} />
             ) : null}
             {agent ? (
-              Platform.OS === 'android' ? (
-                <Marker
-                  coordinate={agent}
-                  title="Delivery partner"
-                  description={
-                    order?.assignedAgent?.vehicleNumber || trackingInfo?.agent?.vehicleNumber
-                      ? `Vehicle ${order?.assignedAgent?.vehicleNumber || trackingInfo?.agent?.vehicleNumber}`
-                      : ''
-                  }
-                  anchor={{ x: 0.5, y: 1 }}
-                  tracksViewChanges={false}
-                >
-                  <Image source={RIDER_MARKER} style={styles.riderIcon} resizeMode="contain" />
-                </Marker>
-              ) : (
-                <Marker
-                  coordinate={agent}
-                  title="Delivery partner"
-                  description={
-                    order?.assignedAgent?.vehicleNumber || trackingInfo?.agent?.vehicleNumber
-                      ? `Vehicle ${order?.assignedAgent?.vehicleNumber || trackingInfo?.agent?.vehicleNumber}`
-                      : ''
-                  }
-                  image={RIDER_MARKER}
-                  anchor={{ x: 0.5, y: 0.88 }}
-                  tracksViewChanges={false}
-                />
-              )
+              <Marker
+                coordinate={agent}
+                title="Delivery partner"
+                description={
+                  order?.assignedAgent?.vehicleNumber || trackingInfo?.agent?.vehicleNumber
+                    ? `Vehicle ${order?.assignedAgent?.vehicleNumber || trackingInfo?.agent?.vehicleNumber}`
+                    : ''
+                }
+                anchor={{ x: 0.5, y: 0.85 }}
+                tracksViewChanges={false}
+              >
+                <View style={styles.bikeBubble}>
+                  <Image source={LIVE_TRACKER_ICON} style={styles.bikeIconImage} resizeMode="contain" />
+                </View>
+              </Marker>
             ) : null}
             {routeCoords?.length >= 2 ? (
               <Polyline
@@ -390,6 +405,20 @@ const OrderTrackingScreen = ({ route, navigation }) => {
               />
             ) : null}
           </MapView>
+        ) : showFallbackWebMap ? (
+          <WebView
+            style={styles.mapWeb}
+            source={{ uri: webMapUri }}
+            javaScriptEnabled
+            domStorageEnabled
+            startInLoadingState
+            renderLoading={() => (
+              <View style={styles.loadingOverlay}>
+                <ActivityIndicator color={COLORS.primary} />
+                <Text style={styles.loadingText}>Opening map preview…</Text>
+              </View>
+            )}
+          />
         ) : (
           <View style={styles.loadingOverlay}>
             <Text style={styles.loadingText}>Map data not available yet</Text>
@@ -397,7 +426,11 @@ const OrderTrackingScreen = ({ route, navigation }) => {
         )}
         <View style={styles.livePill}>
           <Text style={styles.livePillText}>
-            {agent ? 'Live rider tracking' : 'Waiting for rider location'}
+            {agent
+              ? nativeMapLoaded
+                ? 'Live rider tracking'
+                : 'Live map preview mode'
+              : 'Waiting for rider location'}
           </Text>
         </View>
       </View>
@@ -453,8 +486,23 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   mapView: { flex: 1, backgroundColor: '#e2e8f0' },
-  /** RN Maps Android often ignores Marker `image=` — use bitmap child instead. */
-  riderIcon: { width: 48, height: 48 },
+  mapWeb: { flex: 1, backgroundColor: '#e2e8f0' },
+  bikeBubble: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#fff',
+    borderWidth: 1.5,
+    borderColor: COLORS.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 4,
+  },
+  bikeIconImage: { width: 26, height: 26 },
   loadingOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#eef2f7' },
   loadingText: { marginTop: 6, fontSize: 12, color: COLORS.textLight },
   livePill: {

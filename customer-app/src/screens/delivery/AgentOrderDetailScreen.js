@@ -9,7 +9,6 @@ import {
   Linking,
   ActivityIndicator,
   Image,
-  Platform,
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import { WebView } from 'react-native-webview';
@@ -19,7 +18,7 @@ import { COLORS } from '../../config';
 import { format } from 'date-fns';
 import { thinCoordinates, coordsForFit } from '../../utils/mapRoute';
 
-const RIDER_MARKER = require('../../../assets/map-delivery-rider.png');
+const LIVE_TRACKER_ICON = require('../../../assets/map-live-truck.png');
 
 /** @returns {{ latitude: number, longitude: number } | null} */
 function toCoord(lat, lng) {
@@ -51,6 +50,17 @@ function latestTrackingCoord(trackingHistory) {
   return null;
 }
 
+function toMapsDirectionUri(origin, destination, fallbackAddress) {
+  if (origin && destination) {
+    return `https://www.google.com/maps/dir/?api=1&origin=${origin.latitude},${origin.longitude}&destination=${destination.latitude},${destination.longitude}&travelmode=driving`;
+  }
+  if (destination) {
+    return `https://www.google.com/maps/dir/?api=1&destination=${destination.latitude},${destination.longitude}&travelmode=driving`;
+  }
+  const q = encodeURIComponent(fallbackAddress || 'India');
+  return `https://www.google.com/maps/search/?api=1&query=${q}`;
+}
+
 export default function AgentOrderDetailScreen({ route, navigation }) {
   const { orderId } = route.params || {};
   const [order, setOrder] = useState(null);
@@ -61,6 +71,8 @@ export default function AgentOrderDetailScreen({ route, navigation }) {
   const [routeCoords, setRouteCoords] = useState([]);
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeMeta, setRouteMeta] = useState(null);
+  const [nativeMapLoaded, setNativeMapLoaded] = useState(false);
+  const [mapLoadGracePassed, setMapLoadGracePassed] = useState(false);
   const mapRef = useRef(null);
 
   const dropoffCoord = useMemo(
@@ -77,6 +89,10 @@ export default function AgentOrderDetailScreen({ route, navigation }) {
       encodeURIComponent(formatAddress(order?.deliveryAddress) || '');
     return `https://www.google.com/maps/search/?api=1&query=${q || encodeURIComponent('India')}`;
   }, [order?.deliveryAddress]);
+  const mapsRoutePreviewUri = useMemo(
+    () => toMapsDirectionUri(agentPos, dropoffCoord, formatAddress(order?.deliveryAddress)),
+    [agentPos, dropoffCoord, order?.deliveryAddress]
+  );
 
   const fitMapToRoute = useCallback(() => {
     if (!mapRef.current || !dropoffCoord) return;
@@ -254,6 +270,14 @@ export default function AgentOrderDetailScreen({ route, navigation }) {
     return () => clearTimeout(t);
   }, [dropoffCoord, agentPos?.latitude, routeCoords?.length, fitMapToRoute]);
 
+  useEffect(() => {
+    if (!dropoffCoord) return undefined;
+    setNativeMapLoaded(false);
+    setMapLoadGracePassed(false);
+    const t = setTimeout(() => setMapLoadGracePassed(true), 4500);
+    return () => clearTimeout(t);
+  }, [dropoffCoord?.latitude, dropoffCoord?.longitude]);
+
   const load = async () => {
     if (!orderId) return;
     try {
@@ -333,6 +357,8 @@ export default function AgentOrderDetailScreen({ route, navigation }) {
     );
   }
 
+  const showFallbackWebMap = Boolean(dropoffCoord && mapLoadGracePassed && !nativeMapLoaded);
+
   return (
     <View style={styles.root}>
       <View style={styles.header}>
@@ -378,7 +404,7 @@ export default function AgentOrderDetailScreen({ route, navigation }) {
             </Text>
           ) : null}
           <View style={styles.mapShell}>
-            {dropoffCoord ? (
+            {dropoffCoord && !showFallbackWebMap ? (
               <>
                 <MapView
                   ref={mapRef}
@@ -393,46 +419,30 @@ export default function AgentOrderDetailScreen({ route, navigation }) {
                     longitudeDelta: 0.06,
                   }}
                   onMapReady={() => fitMapToRoute()}
+                  onMapLoaded={() => setNativeMapLoaded(true)}
                 >
-                  {Platform.OS === 'android' ? (
+                  <Marker
+                    coordinate={dropoffCoord}
+                    title="Deliver here"
+                    description={formatAddress(order.deliveryAddress)}
+                    anchor={{ x: 0.5, y: 1 }}
+                    tracksViewChanges={false}
+                  >
+                    <View style={styles.dropPin}>
+                      <View style={styles.dropPinInner} />
+                    </View>
+                  </Marker>
+                  {agentPos ? (
                     <Marker
-                      coordinate={dropoffCoord}
-                      title="Deliver here"
-                      description={formatAddress(order.deliveryAddress)}
-                      anchor={{ x: 0.5, y: 1 }}
+                      coordinate={agentPos}
+                      title="Your position"
+                      anchor={{ x: 0.5, y: 0.85 }}
                       tracksViewChanges={false}
                     >
-                      <View style={styles.dropPin}>
-                        <View style={styles.dropPinInner} />
+                      <View style={styles.bikeBubble}>
+                        <Image source={LIVE_TRACKER_ICON} style={styles.bikeIconImage} resizeMode="contain" />
                       </View>
                     </Marker>
-                  ) : (
-                    <Marker
-                      coordinate={dropoffCoord}
-                      title="Deliver here"
-                      description={formatAddress(order.deliveryAddress)}
-                      pinColor={COLORS.primaryDark}
-                    />
-                  )}
-                  {agentPos ? (
-                    Platform.OS === 'android' ? (
-                      <Marker
-                        coordinate={agentPos}
-                        title="Your position"
-                        anchor={{ x: 0.5, y: 1 }}
-                        tracksViewChanges={false}
-                      >
-                        <Image source={RIDER_MARKER} style={styles.riderIcon} resizeMode="contain" />
-                      </Marker>
-                    ) : (
-                      <Marker
-                        coordinate={agentPos}
-                        title="Your position"
-                        image={RIDER_MARKER}
-                        anchor={{ x: 0.5, y: 0.88 }}
-                        tracksViewChanges={false}
-                      />
-                    )
                   ) : null}
                   {routeCoords?.length >= 2 ? (
                     <Polyline coordinates={routeCoords} strokeColor={COLORS.primary} strokeWidth={6} />
@@ -446,6 +456,20 @@ export default function AgentOrderDetailScreen({ route, navigation }) {
                   </View>
                 ) : null}
               </>
+            ) : showFallbackWebMap ? (
+              <WebView
+                style={styles.mapWeb}
+                source={{ uri: mapsRoutePreviewUri || mapsSearchUri }}
+                javaScriptEnabled
+                domStorageEnabled
+                startInLoadingState
+                renderLoading={() => (
+                  <View style={styles.mapLoading}>
+                    <ActivityIndicator color={COLORS.primary} />
+                    <Text style={styles.mapLoadingTxt}>Opening map preview…</Text>
+                  </View>
+                )}
+              />
             ) : (
               <WebView
                 style={styles.mapWeb}
@@ -619,7 +643,22 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.border,
     position: 'relative',
   },
-  riderIcon: { width: 48, height: 48 },
+  bikeBubble: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#fff',
+    borderWidth: 1.5,
+    borderColor: COLORS.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 4,
+  },
+  bikeIconImage: { width: 26, height: 26 },
   dropPin: {
     width: 20,
     height: 20,
