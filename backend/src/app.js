@@ -1,5 +1,15 @@
 import 'dotenv/config';
+import dns from 'node:dns';
 import express from 'express';
+
+/**
+ * Gmail SMTP often resolves to IPv6 first. Many cloud hosts (e.g. Render) cannot route
+ * outbound IPv6 to smtp.gmail.com:587 → nodemailer fails with connect ENETUNREACH ... ::6d:587.
+ * Prefer IPv4 for all DNS lookups (Node 17+).
+ */
+if (typeof dns.setDefaultResultOrder === 'function') {
+  dns.setDefaultResultOrder('ipv4first');
+}
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
