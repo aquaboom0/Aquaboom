@@ -10,8 +10,7 @@ import {
   Alert,
   Image,
 } from 'react-native';
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
-import { WebView } from 'react-native-webview';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE, Circle } from 'react-native-maps';
 import { useDispatch, useSelector } from 'react-redux';
 import {
   fetchOrderDetails,
@@ -58,18 +57,15 @@ const latestTrackingCoord = (trackingHistory) => {
   return null;
 };
 
-const toGoogleMapsUri = (origin, dest, destText) => {
-  if (origin && dest) {
-    return `https://www.google.com/maps/dir/?api=1&origin=${origin.latitude},${origin.longitude}&destination=${dest.latitude},${dest.longitude}&travelmode=driving`;
-  }
-  if (dest) {
-    return `https://www.google.com/maps/dir/?api=1&destination=${dest.latitude},${dest.longitude}&travelmode=driving`;
-  }
-  if (destText) {
-    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(destText)}`;
-  }
-  return 'https://www.google.com/maps/search/?api=1&query=India';
-};
+const ZEPTO_MAP_STYLE = [
+  { elementType: 'geometry', stylers: [{ color: '#f4f4f8' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#6b7280' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#ffffff' }] },
+  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#ffffff' }] },
+  { featureType: 'road.arterial', elementType: 'geometry', stylers: [{ color: '#eef2ff' }] },
+  { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+  { featureType: 'transit', stylers: [{ visibility: 'off' }] },
+];
 
 const OrderTrackingScreen = ({ route, navigation }) => {
   const orderId = route?.params?.orderId;
@@ -81,8 +77,6 @@ const OrderTrackingScreen = ({ route, navigation }) => {
   const [routeCoords, setRouteCoords] = useState([]);
   const [routeLoading, setRouteLoading] = useState(false);
   const [driveMeta, setDriveMeta] = useState(null);
-  const [nativeMapLoaded, setNativeMapLoaded] = useState(false);
-  const [mapLoadGracePassed, setMapLoadGracePassed] = useState(false);
   const mapRef = useRef(null);
 
   const order = useMemo(() => {
@@ -285,13 +279,6 @@ const OrderTrackingScreen = ({ route, navigation }) => {
     return () => clearTimeout(t);
   }, [routeCoords, fitCamera]);
 
-  useEffect(() => {
-    setNativeMapLoaded(false);
-    setMapLoadGracePassed(false);
-    const t = setTimeout(() => setMapLoadGracePassed(true), 4500);
-    return () => clearTimeout(t);
-  }, [orderId]);
-
   const openExternalMap = async () => {
     try {
       let url = '';
@@ -313,11 +300,6 @@ const OrderTrackingScreen = ({ route, navigation }) => {
 
   const centerLat = destination?.latitude || agent?.latitude || 20.5937;
   const centerLng = destination?.longitude || agent?.longitude || 78.9629;
-  const webMapUri = useMemo(
-    () => toGoogleMapsUri(agent, destination, destinationText),
-    [agent, destination, destinationText]
-  );
-  const showFallbackWebMap = (destination || agent) && mapLoadGracePassed && !nativeMapLoaded;
 
   if ((isLoading && !order) || !orderId) {
     return (
@@ -362,11 +344,12 @@ const OrderTrackingScreen = ({ route, navigation }) => {
       </View>
 
       <View style={styles.mapCard}>
-        {(destination || agent) && !showFallbackWebMap ? (
+        {(destination || agent) ? (
           <MapView
             ref={mapRef}
             style={styles.mapView}
             provider={PROVIDER_GOOGLE}
+            customMapStyle={ZEPTO_MAP_STYLE}
             initialRegion={{
               latitude: centerLat,
               longitude: centerLng,
@@ -374,11 +357,24 @@ const OrderTrackingScreen = ({ route, navigation }) => {
               longitudeDelta: 0.08,
             }}
             onMapReady={() => fitCamera()}
-            onMapLoaded={() => setNativeMapLoaded(true)}
             showsUserLocation={false}
+            showsCompass={false}
+            showsTraffic={false}
+            showsIndoors={false}
+            toolbarEnabled={false}
+            rotateEnabled={false}
+            pitchEnabled={false}
           >
             {destination ? (
               <Marker coordinate={destination} title="Deliver to you" pinColor={COLORS.primaryDark} />
+            ) : null}
+            {agent ? (
+              <Circle
+                center={agent}
+                radius={45}
+                strokeWidth={0}
+                fillColor="rgba(108,43,217,0.14)"
+              />
             ) : null}
             {agent ? (
               <Marker
@@ -400,25 +396,11 @@ const OrderTrackingScreen = ({ route, navigation }) => {
             {routeCoords?.length >= 2 ? (
               <Polyline
                 coordinates={routeCoords}
-                strokeColor={COLORS.primary}
-                strokeWidth={5}
+                strokeColor="#6C2BD9"
+                strokeWidth={6}
               />
             ) : null}
           </MapView>
-        ) : showFallbackWebMap ? (
-          <WebView
-            style={styles.mapWeb}
-            source={{ uri: webMapUri }}
-            javaScriptEnabled
-            domStorageEnabled
-            startInLoadingState
-            renderLoading={() => (
-              <View style={styles.loadingOverlay}>
-                <ActivityIndicator color={COLORS.primary} />
-                <Text style={styles.loadingText}>Opening map preview…</Text>
-              </View>
-            )}
-          />
         ) : (
           <View style={styles.loadingOverlay}>
             <Text style={styles.loadingText}>Map data not available yet</Text>
@@ -426,11 +408,7 @@ const OrderTrackingScreen = ({ route, navigation }) => {
         )}
         <View style={styles.livePill}>
           <Text style={styles.livePillText}>
-            {agent
-              ? nativeMapLoaded
-                ? 'Live rider tracking'
-                : 'Live map preview mode'
-              : 'Waiting for rider location'}
+            {agent ? 'Live rider tracking' : 'Waiting for rider location'}
           </Text>
         </View>
       </View>
@@ -486,7 +464,6 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   mapView: { flex: 1, backgroundColor: '#e2e8f0' },
-  mapWeb: { flex: 1, backgroundColor: '#e2e8f0' },
   bikeBubble: {
     width: 38,
     height: 38,
