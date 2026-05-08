@@ -11,6 +11,7 @@ import {
   Image,
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE, Circle } from 'react-native-maps';
+import { WebView } from 'react-native-webview';
 import { useDispatch, useSelector } from 'react-redux';
 import {
   fetchOrderDetails,
@@ -21,6 +22,7 @@ import { connectSocket, disconnectSocket } from '../../store/slices/socketSlice'
 import { trackingAPI } from '../../services/api';
 import { COLORS } from '../../config';
 import { coordsForFit, thinCoordinates } from '../../utils/mapRoute';
+import { buildLeafletTrackingHtml } from '../../utils/leafletMapHtml';
 
 const LIVE_TRACKER_ICON = require('../../../assets/map-live-truck.png');
 
@@ -77,6 +79,8 @@ const OrderTrackingScreen = ({ route, navigation }) => {
   const [routeCoords, setRouteCoords] = useState([]);
   const [routeLoading, setRouteLoading] = useState(false);
   const [driveMeta, setDriveMeta] = useState(null);
+  const [nativeMapLoaded, setNativeMapLoaded] = useState(false);
+  const [mapLoadGracePassed, setMapLoadGracePassed] = useState(false);
   const mapRef = useRef(null);
 
   const order = useMemo(() => {
@@ -279,6 +283,13 @@ const OrderTrackingScreen = ({ route, navigation }) => {
     return () => clearTimeout(t);
   }, [routeCoords, fitCamera]);
 
+  useEffect(() => {
+    setNativeMapLoaded(false);
+    setMapLoadGracePassed(false);
+    const t = setTimeout(() => setMapLoadGracePassed(true), 5500);
+    return () => clearTimeout(t);
+  }, [orderId, agent?.latitude, agent?.longitude, destination?.latitude, destination?.longitude]);
+
   const openExternalMap = async () => {
     try {
       let url = '';
@@ -300,6 +311,17 @@ const OrderTrackingScreen = ({ route, navigation }) => {
 
   const centerLat = destination?.latitude || agent?.latitude || 20.5937;
   const centerLng = destination?.longitude || agent?.longitude || 78.9629;
+  const showFallbackWebMap = Boolean((destination || agent) && mapLoadGracePassed && !nativeMapLoaded);
+  const fallbackHtml = useMemo(
+    () =>
+      buildLeafletTrackingHtml({
+        center: { latitude: centerLat, longitude: centerLng },
+        agent,
+        destination,
+        routeCoords,
+      }),
+    [centerLat, centerLng, agent, destination, routeCoords]
+  );
 
   if ((isLoading && !order) || !orderId) {
     return (
@@ -344,7 +366,7 @@ const OrderTrackingScreen = ({ route, navigation }) => {
       </View>
 
       <View style={styles.mapCard}>
-        {(destination || agent) ? (
+        {(destination || agent) && !showFallbackWebMap ? (
           <MapView
             ref={mapRef}
             style={styles.mapView}
@@ -357,6 +379,7 @@ const OrderTrackingScreen = ({ route, navigation }) => {
               longitudeDelta: 0.08,
             }}
             onMapReady={() => fitCamera()}
+            onMapLoaded={() => setNativeMapLoaded(true)}
             showsUserLocation={false}
             showsCompass={false}
             showsTraffic={false}
@@ -401,6 +424,21 @@ const OrderTrackingScreen = ({ route, navigation }) => {
               />
             ) : null}
           </MapView>
+        ) : showFallbackWebMap ? (
+          <WebView
+            style={styles.mapWeb}
+            source={{ html: fallbackHtml }}
+            originWhitelist={['*']}
+            javaScriptEnabled
+            domStorageEnabled
+            startInLoadingState
+            renderLoading={() => (
+              <View style={styles.loadingOverlay}>
+                <ActivityIndicator color={COLORS.primary} />
+                <Text style={styles.loadingText}>Loading fallback map…</Text>
+              </View>
+            )}
+          />
         ) : (
           <View style={styles.loadingOverlay}>
             <Text style={styles.loadingText}>Map data not available yet</Text>
@@ -408,7 +446,7 @@ const OrderTrackingScreen = ({ route, navigation }) => {
         )}
         <View style={styles.livePill}>
           <Text style={styles.livePillText}>
-            {agent ? 'Live rider tracking' : 'Waiting for rider location'}
+            {agent ? (showFallbackWebMap ? 'Live rider tracking (fallback)' : 'Live rider tracking') : 'Waiting for rider location'}
           </Text>
         </View>
       </View>
@@ -464,6 +502,7 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   mapView: { flex: 1, backgroundColor: '#e2e8f0' },
+  mapWeb: { flex: 1, backgroundColor: '#e2e8f0' },
   bikeBubble: {
     width: 38,
     height: 38,

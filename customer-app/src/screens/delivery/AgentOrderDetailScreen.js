@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -8,17 +8,14 @@ import {
   Alert,
   Linking,
   ActivityIndicator,
-  Image,
 } from 'react-native';
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import { WebView } from 'react-native-webview';
 import * as Location from 'expo-location';
 import { deliveryAPI } from '../../services/api';
 import { COLORS } from '../../config';
 import { format } from 'date-fns';
-import { thinCoordinates, coordsForFit } from '../../utils/mapRoute';
-
-const LIVE_TRACKER_ICON = require('../../../assets/map-live-truck.png');
+import { thinCoordinates } from '../../utils/mapRoute';
+import { buildLeafletTrackingHtml } from '../../utils/leafletMapHtml';
 
 /** @returns {{ latitude: number, longitude: number } | null} */
 function toCoord(lat, lng) {
@@ -50,17 +47,6 @@ function latestTrackingCoord(trackingHistory) {
   return null;
 }
 
-function toMapsDirectionUri(origin, destination, fallbackAddress) {
-  if (origin && destination) {
-    return `https://www.google.com/maps/dir/?api=1&origin=${origin.latitude},${origin.longitude}&destination=${destination.latitude},${destination.longitude}&travelmode=driving`;
-  }
-  if (destination) {
-    return `https://www.google.com/maps/dir/?api=1&destination=${destination.latitude},${destination.longitude}&travelmode=driving`;
-  }
-  const q = encodeURIComponent(fallbackAddress || 'India');
-  return `https://www.google.com/maps/search/?api=1&query=${q}`;
-}
-
 export default function AgentOrderDetailScreen({ route, navigation }) {
   const { orderId } = route.params || {};
   const [order, setOrder] = useState(null);
@@ -71,9 +57,6 @@ export default function AgentOrderDetailScreen({ route, navigation }) {
   const [routeCoords, setRouteCoords] = useState([]);
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeMeta, setRouteMeta] = useState(null);
-  const [nativeMapLoaded, setNativeMapLoaded] = useState(false);
-  const [mapLoadGracePassed, setMapLoadGracePassed] = useState(false);
-  const mapRef = useRef(null);
 
   const dropoffCoord = useMemo(
     () => toCoord(order?.deliveryAddress?.lat, order?.deliveryAddress?.lng),
@@ -84,40 +67,16 @@ export default function AgentOrderDetailScreen({ route, navigation }) {
     [order?.trackingHistory]
   );
 
-  const mapsSearchUri = useMemo(() => {
-    const q =
-      encodeURIComponent(formatAddress(order?.deliveryAddress) || '');
-    return `https://www.google.com/maps/search/?api=1&query=${q || encodeURIComponent('India')}`;
-  }, [order?.deliveryAddress]);
-  const mapsRoutePreviewUri = useMemo(
-    () => toMapsDirectionUri(agentPos, dropoffCoord, formatAddress(order?.deliveryAddress)),
-    [agentPos, dropoffCoord, order?.deliveryAddress]
+  const fallbackHtml = useMemo(
+    () =>
+      buildLeafletTrackingHtml({
+        center: dropoffCoord || agentPos,
+        agent: agentPos,
+        destination: dropoffCoord,
+        routeCoords,
+      }),
+    [dropoffCoord, agentPos, routeCoords]
   );
-
-  const fitMapToRoute = useCallback(() => {
-    if (!mapRef.current || !dropoffCoord) return;
-    const pts = coordsForFit([dropoffCoord, agentPos, routeCoords]);
-    if (pts.length >= 2) {
-      try {
-        mapRef.current.fitToCoordinates(pts, {
-          edgePadding: { top: 64, right: 40, bottom: 96, left: 40 },
-          animated: true,
-        });
-      } catch (_e) {
-        // ignore
-      }
-      return;
-    }
-    mapRef.current.animateToRegion(
-      {
-        latitude: dropoffCoord.latitude,
-        longitude: dropoffCoord.longitude,
-        latitudeDelta: 0.04,
-        longitudeDelta: 0.04,
-      },
-      320
-    );
-  }, [dropoffCoord, agentPos, routeCoords]);
 
   useEffect(() => {
     if (!agentPos && historyAgentCoord) {
@@ -265,19 +224,6 @@ export default function AgentOrderDetailScreen({ route, navigation }) {
     agentPos?.longitude,
   ]);
 
-  useEffect(() => {
-    const t = setTimeout(fitMapToRoute, 600);
-    return () => clearTimeout(t);
-  }, [dropoffCoord, agentPos?.latitude, routeCoords?.length, fitMapToRoute]);
-
-  useEffect(() => {
-    if (!dropoffCoord) return undefined;
-    setNativeMapLoaded(false);
-    setMapLoadGracePassed(false);
-    const t = setTimeout(() => setMapLoadGracePassed(true), 4500);
-    return () => clearTimeout(t);
-  }, [dropoffCoord?.latitude, dropoffCoord?.longitude]);
-
   const load = async () => {
     if (!orderId) return;
     try {
@@ -357,8 +303,6 @@ export default function AgentOrderDetailScreen({ route, navigation }) {
     );
   }
 
-  const showFallbackWebMap = Boolean(dropoffCoord && mapLoadGracePassed && !nativeMapLoaded);
-
   return (
     <View style={styles.root}>
       <View style={styles.header}>
@@ -404,91 +348,26 @@ export default function AgentOrderDetailScreen({ route, navigation }) {
             </Text>
           ) : null}
           <View style={styles.mapShell}>
-            {dropoffCoord && !showFallbackWebMap ? (
-              <>
-                <MapView
-                  ref={mapRef}
-                  style={StyleSheet.absoluteFillObject}
-                  provider={PROVIDER_GOOGLE}
-                  showsUserLocation={false}
-                  showsMyLocationButton={false}
-                  initialRegion={{
-                    latitude: dropoffCoord.latitude,
-                    longitude: dropoffCoord.longitude,
-                    latitudeDelta: 0.06,
-                    longitudeDelta: 0.06,
-                  }}
-                  onMapReady={() => fitMapToRoute()}
-                  onMapLoaded={() => setNativeMapLoaded(true)}
-                >
-                  <Marker
-                    coordinate={dropoffCoord}
-                    title="Deliver here"
-                    description={formatAddress(order.deliveryAddress)}
-                    anchor={{ x: 0.5, y: 1 }}
-                    tracksViewChanges={false}
-                  >
-                    <View style={styles.dropPin}>
-                      <View style={styles.dropPinInner} />
-                    </View>
-                  </Marker>
-                  {agentPos ? (
-                    <Marker
-                      coordinate={agentPos}
-                      title="Your position"
-                      anchor={{ x: 0.5, y: 0.85 }}
-                      tracksViewChanges={false}
-                    >
-                      <View style={styles.bikeBubble}>
-                        <Image source={LIVE_TRACKER_ICON} style={styles.bikeIconImage} resizeMode="contain" />
-                      </View>
-                    </Marker>
-                  ) : null}
-                  {routeCoords?.length >= 2 ? (
-                    <Polyline coordinates={routeCoords} strokeColor={COLORS.primary} strokeWidth={6} />
-                  ) : null}
-                </MapView>
-                {!navPermission ? (
-                  <View style={styles.mapHintBanner}>
-                    <Text style={styles.mapHintTxt}>
-                      Enable location permission so your position and route can update.
-                    </Text>
-                  </View>
-                ) : null}
-              </>
-            ) : showFallbackWebMap ? (
-              <WebView
-                style={styles.mapWeb}
-                source={{ uri: mapsRoutePreviewUri || mapsSearchUri }}
-                javaScriptEnabled
-                domStorageEnabled
-                startInLoadingState
-                renderLoading={() => (
-                  <View style={styles.mapLoading}>
-                    <ActivityIndicator color={COLORS.primary} />
-                    <Text style={styles.mapLoadingTxt}>Opening map preview…</Text>
-                  </View>
-                )}
-              />
-            ) : (
-              <WebView
-                style={styles.mapWeb}
-                source={{ uri: mapsSearchUri }}
-                javaScriptEnabled
-                domStorageEnabled
-                startInLoadingState
-                renderLoading={() => (
-                  <View style={styles.mapLoading}>
-                    <ActivityIndicator color={COLORS.primary} />
-                    <Text style={styles.mapLoadingTxt}>Opening map preview…</Text>
-                  </View>
-                )}
-              />
-            )}
-            {dropoffCoord ? (
-              <TouchableOpacity style={styles.recenterChip} onPress={() => fitMapToRoute()}>
-                <Text style={styles.recenterChipTxt}>Fit route</Text>
-              </TouchableOpacity>
+            <WebView
+              style={styles.mapWeb}
+              source={{ html: fallbackHtml }}
+              originWhitelist={['*']}
+              javaScriptEnabled
+              domStorageEnabled
+              startInLoadingState
+              renderLoading={() => (
+                <View style={styles.mapLoading}>
+                  <ActivityIndicator color={COLORS.primary} />
+                  <Text style={styles.mapLoadingTxt}>Loading live map…</Text>
+                </View>
+              )}
+            />
+            {!navPermission ? (
+              <View style={styles.mapHintBanner}>
+                <Text style={styles.mapHintTxt}>
+                  Enable location permission so your position and route can update.
+                </Text>
+              </View>
             ) : null}
           </View>
           {dropoffCoord ? null : (
@@ -637,48 +516,11 @@ const styles = StyleSheet.create({
     marginTop: -2,
   },
   mapShell: {
-    height: 300,
+    height: 380,
     borderRadius: 12,
     overflow: 'hidden',
     backgroundColor: COLORS.border,
     position: 'relative',
-  },
-  bikeBubble: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#fff',
-    borderWidth: 1.5,
-    borderColor: COLORS.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 4,
-  },
-  bikeIconImage: { width: 26, height: 26 },
-  dropPin: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: COLORS.primaryDark,
-    borderWidth: 3,
-    borderColor: '#fff',
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 3,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  dropPinInner: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#fff',
   },
   mapWeb: { flex: 1, backgroundColor: '#e2e8f0' },
   mapLoading: {
@@ -698,22 +540,6 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   mapHintTxt: { fontSize: 11, color: COLORS.textLight },
-  recenterChip: {
-    position: 'absolute',
-    right: 10,
-    top: 10,
-    backgroundColor: COLORS.surface,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 8,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.15,
-    shadowRadius: 2,
-    opacity: 1,
-  },
-  recenterChipTxt: { fontSize: 12, fontWeight: '700', color: COLORS.primaryDark },
   mapFallbackNote: {
     marginTop: 10,
     fontSize: 12,
