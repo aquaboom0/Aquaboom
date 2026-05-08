@@ -137,7 +137,11 @@ const LoginScreen = ({ navigation }) => {
       setForgotEmail(targetEmail);
       setForgotStep(2);
     } catch (err) {
-      const message = err?.response?.data?.message || 'Failed to send reset code.';
+      const code = err?.code;
+      const message =
+        code === 'ECONNABORTED' || /timeout/i.test(String(err?.message || ''))
+          ? 'Request timed out. Check your connection and API URL, then try again.'
+          : err?.response?.data?.message || err?.message || 'Failed to send reset code.';
       Alert.alert('Error', message);
     } finally {
       setIsForgotLoading(false);

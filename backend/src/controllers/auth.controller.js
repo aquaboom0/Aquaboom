@@ -160,16 +160,23 @@ async function getResetMailTransporter() {
   const host = process.env.SMTP_HOST;
   const port = Number(process.env.SMTP_PORT || 587);
   const secure = String(process.env.SMTP_SECURE || '').toLowerCase() === 'true' || port === 465;
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
+  const user = String(process.env.SMTP_USER || '').trim();
+  /** Gmail app passwords must be 16 chars without spaces — trim helps pasted values */
+  const pass = String(process.env.SMTP_PASS || '').replace(/\s+/g, '');
   if (!host || !user || !pass) {
     return null;
   }
+  const connMs = Number(process.env.SMTP_CONNECTION_TIMEOUT_MS || 12000);
+  const sockMs = Number(process.env.SMTP_SOCKET_TIMEOUT_MS || 20000);
   cachedResetMailTransporter = nodemailer.createTransport({
     host,
     port,
     secure,
     auth: { user, pass },
+    connectionTimeout: connMs,
+    greetingTimeout: connMs,
+    socketTimeout: sockMs,
+    ...(port === 587 && !secure ? { requireTLS: true } : {}),
   });
   return cachedResetMailTransporter;
 }
@@ -184,14 +191,22 @@ async function sendResetCodeEmail(email, code) {
   }
   const appName = process.env.APP_NAME || 'AquaBoom';
   const from = process.env.SMTP_FROM || process.env.SMTP_USER;
-  await transporter.sendMail({
+  const sendTimeoutMs = Number(process.env.SMTP_SEND_TIMEOUT_MS || 22000);
+  const mailOptions = {
     from,
     to: email,
     subject: `${appName} password reset code`,
     text: `Your ${appName} password reset code is ${code}. It expires in ${
       Number(process.env.PASSWORD_RESET_CODE_EXPIRY_MINUTES || 10) || 10
     } minutes.`,
-  });
+  };
+  await Promise.race([
+    transporter.sendMail(mailOptions),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`sendMail timed out after ${sendTimeoutMs}ms`)), sendTimeoutMs)
+    ),
+  ]);
+  logger.info(`Password reset email sent to ${email}`);
   return true;
 }
 
@@ -763,11 +778,29 @@ export const requestPasswordResetCode = async (req, res) => {
       attempts: 0,
     });
 
-    await sendResetCodeEmail(normalizedEmail, resetCode);
-    return res.json({
+    /**
+     * Respond immediately — nodemailer/Gmail SMTP from cloud hosts can hang for a long time
+     * (blocked egress, TLS, cold SMTP), which left the app stuck on loading. Email sends in background.
+     */
+    const isDev = process.env.NODE_ENV !== 'production';
+    res.json({
       success: true,
       message: 'If this email is registered, a reset code has been sent.',
-      ...(process.env.NODE_ENV !== 'production' ? { devCode: resetCode } : {}),
+      ...(isDev ? { devCode: resetCode } : {}),
+    });
+
+    setImmediate(() => {
+      sendResetCodeEmail(normalizedEmail, resetCode)
+        .then((sent) => {
+          if (sent === false) {
+            logger.warn(
+              `Password reset code generated for ${normalizedEmail} but email was not sent (check SMTP_* env vars).`
+            );
+          }
+        })
+        .catch((err) => {
+          logger.error(`Password reset email failed for ${normalizedEmail}: ${err.message}`);
+        });
     });
   } catch (error) {
     logger.error(`Request password reset code error: ${error.message}`);

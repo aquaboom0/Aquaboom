@@ -148,11 +148,13 @@ export const authAPI = {
   // Register
   register: (userData) => api.post('/auth/register', userData),
 
-  requestPasswordResetCode: (email) => api.post('/auth/forgot-password/request-code', { email }),
+  /** Shorter timeouts so forgot-password never blocks the UI for the global 120s axios limit. */
+  requestPasswordResetCode: (email) =>
+    api.post('/auth/forgot-password/request-code', { email }, { timeout: 45000 }),
   verifyPasswordResetCode: (email, code) =>
-    api.post('/auth/forgot-password/verify-code', { email, code }),
+    api.post('/auth/forgot-password/verify-code', { email, code }, { timeout: 45000 }),
   resetPasswordWithCode: (email, newPassword) =>
-    api.post('/auth/forgot-password/reset', { email, newPassword }),
+    api.post('/auth/forgot-password/reset', { email, newPassword }, { timeout: 45000 }),
   
   // Get profile
   getProfile: () => api.get('/auth/profile'),
