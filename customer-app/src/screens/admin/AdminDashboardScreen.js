@@ -252,18 +252,17 @@ const AdminDashboardScreen = () => {
       });
       if (picked.canceled || !picked.assets?.[0]?.uri) return;
       const asset = picked.assets[0];
-      const form = new FormData();
       const ext = asset.uri.split('.').pop()?.toLowerCase() || 'jpg';
       const mime =
         asset.mimeType ||
         (ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg');
-      form.append('image', {
+      const filePart = {
         uri: asset.uri,
         name: `product.${ext === 'jpeg' ? 'jpg' : ext}`,
         type: mime,
-      });
+      };
       setUploadingProductImg(true);
-      const res = await adminAPI.uploadProductImage(form);
+      const res = await adminAPI.uploadProductImage(filePart);
       const path = res.data?.data?.path;
       if (!path) {
         Alert.alert('Upload failed', 'No image URL returned');

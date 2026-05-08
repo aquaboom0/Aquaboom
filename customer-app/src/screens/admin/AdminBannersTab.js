@@ -66,19 +66,18 @@ const AdminBannersTab = () => {
       if (picked.canceled || !picked.assets?.[0]) return;
       const asset = picked.assets[0];
 
-      const form = new FormData();
       const ext = asset.uri.split('.').pop()?.toLowerCase() || 'jpg';
       const mime =
         asset.mimeType ||
         (ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg');
-      form.append('image', {
+      const filePart = {
         uri: asset.uri,
         name: `poster.${ext === 'jpeg' ? 'jpg' : ext}`,
         type: mime,
-      });
+      };
 
       setUploading(true);
-      const res = await adminAPI.uploadBannerImage(form);
+      const res = await adminAPI.uploadBannerImage(filePart);
       const path = res.data?.data?.path || res.data?.data?.url;
       if (!path) {
         Alert.alert('Upload failed', 'No file URL returned');

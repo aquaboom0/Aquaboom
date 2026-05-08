@@ -94,18 +94,38 @@ function sleep(ms) {
 }
 
 /** Multipart uploads are heavier; extra warm-up retries help Render cold starts and flaky LTE. */
-async function postMultipartWithWarmRetries(urlPath, formData) {
+async function postMultipartWithWarmRetries(urlPath, filePart) {
   const base = String(getApiBaseUrlSync() || '');
   const isRender = /\.onrender\.com/i.test(base);
   const maxAttempts = isRender ? 4 : 2;
+  const normalizedBase = base.replace(/\/+$/, '');
+  const normalizedPath = String(urlPath || '').startsWith('/') ? String(urlPath) : `/${urlPath}`;
+  const url = `${normalizedBase}${normalizedPath}`;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     if (isRender) await warmRenderIfNeeded();
     try {
-      return await api.post(urlPath, formData, {
-        timeout: 120000,
-        maxBodyLength: Infinity,
-        maxContentLength: Infinity,
+      const token =
+        (await AsyncStorage.getItem('authToken')) || (await AsyncStorage.getItem('customerToken'));
+      const formData = new FormData();
+      formData.append('image', filePart);
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        body: formData,
       });
+      const raw = await response.text();
+      let data = null;
+      try {
+        data = raw ? JSON.parse(raw) : null;
+      } catch {
+        data = raw ? { message: raw } : null;
+      }
+      if (!response.ok) {
+        const err = new Error(data?.message || `Upload failed (${response.status})`);
+        err.response = { status: response.status, data: data || { message: `Upload failed (${response.status})` } };
+        throw err;
+      }
+      return { data: data || {} };
     } catch (err) {
       if (attempt >= maxAttempts || !isTransientNetworkFailure(err)) throw err;
       await sleep(isRender ? 3000 + attempt * 1500 : 1200 * attempt);
@@ -171,12 +191,12 @@ export const adminAPI = {
   approveOrder: (orderId) => api.post(`/admin/orders/${orderId}/approve`),
   declineOrder: (orderId, reason) => api.post(`/admin/orders/${orderId}/decline`, { reason }),
   getProducts: () => api.get('/admin/products'),
-  uploadProductImage: (formData) => postMultipartWithWarmRetries('/admin/products/upload-image', formData),
+  uploadProductImage: (filePart) => postMultipartWithWarmRetries('/admin/products/upload-image', filePart),
   createProduct: (data) => api.post('/admin/products', data),
   updateProduct: (id, data) => api.put(`/admin/products/${id}`, data),
   deleteProduct: (id) => api.delete(`/admin/products/${id}`),
   getAdminBanners: () => api.get('/banners/admin'),
-  uploadBannerImage: (formData) => postMultipartWithWarmRetries('/banners/upload', formData),
+  uploadBannerImage: (filePart) => postMultipartWithWarmRetries('/banners/upload', filePart),
   createBanner: (payload) => api.post('/banners/', payload),
   updateBanner: (bannerId, payload) => api.put(`/banners/${bannerId}`, payload),
   deleteBanner: (bannerId) => api.delete(`/banners/${bannerId}`),
