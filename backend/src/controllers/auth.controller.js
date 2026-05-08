@@ -4,6 +4,7 @@ import User from '../models/User.js';
 import DeliveryAgent from '../models/DeliveryAgent.js';
 import AdminPushToken from '../models/AdminPushToken.js';
 import { logger } from '../config/logger.js';
+import { assignNextOrderToAgent, processPendingOrders } from '../services/orderAssignment.service.js';
 import { normalizeIndiaMobilePhone } from '../utils/phone.js';
 
 // In-memory OTP storage (use Redis in production)
@@ -838,6 +839,16 @@ export const agentLogin = async (req, res) => {
 
     agent.lastSeen = new Date();
     await agent.save();
+
+    // If this partner was set available earlier and had queued approvals waiting, attach next order now.
+    if (agent.isActive && agent.isOnline && agent.isAvailable && !agent.activeOrderId) {
+      try {
+        await assignNextOrderToAgent(agent._id, null);
+        await processPendingOrders(null);
+      } catch (assignErr) {
+        logger.error(`Agent login queue assign error: ${assignErr.message}`);
+      }
+    }
 
     const token = jwt.sign(
       { agentId: agent._id, role: 'delivery_agent' },

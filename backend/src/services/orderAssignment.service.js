@@ -199,6 +199,131 @@ export const assignOrderToAgent = async (orderId, io) => {
   }
 };
 
+/**
+ * Assign the oldest approved order in queue to a specific agent (if eligible).
+ * Used when a busy/offline partner becomes available again.
+ */
+export const assignNextOrderToAgent = async (agentId, io) => {
+  try {
+    const agent = await DeliveryAgent.findById(agentId);
+    if (!agent) return null;
+    if (!agent.isActive || !agent.isOnline || !agent.isAvailable || agent.activeOrderId) {
+      return null;
+    }
+
+    const nextOrder = await Order.findOne({
+      status: 'AUTO_APPROVED',
+      assignedAgent: null,
+      paymentStatus: 'PAID',
+    }).sort({ createdAt: 1 });
+
+    if (!nextOrder) return null;
+
+    // Lock agent first (best-effort guard against duplicate assignment race).
+    const lockedAgent = await DeliveryAgent.findOneAndUpdate(
+      {
+        _id: agent._id,
+        isActive: true,
+        isOnline: true,
+        isAvailable: true,
+        activeOrderId: null,
+      },
+      {
+        $set: {
+          isAvailable: false,
+          activeOrderId: nextOrder._id,
+          lastSeen: new Date(),
+        },
+      },
+      { new: true }
+    );
+    if (!lockedAgent) return null;
+
+    // If order got assigned in parallel, unlock and exit.
+    const order = await Order.findOneAndUpdate(
+      {
+        _id: nextOrder._id,
+        status: 'AUTO_APPROVED',
+        assignedAgent: null,
+      },
+      {
+        $set: {
+          status: 'ASSIGNED',
+          assignedAgent: lockedAgent._id,
+          assignedAt: new Date(),
+        },
+        $push: {
+          trackingHistory: {
+            status: 'ASSIGNED',
+            timestamp: new Date(),
+            note: `Assigned to ${lockedAgent.name}`,
+          },
+        },
+      },
+      { new: true }
+    );
+
+    if (!order) {
+      await DeliveryAgent.findByIdAndUpdate(lockedAgent._id, {
+        $set: { isAvailable: true, activeOrderId: null },
+      });
+      return null;
+    }
+
+    const customer = await User.findById(order.customer);
+
+    if (lockedAgent.fcmToken) {
+      const { addressLine, mapImageUrl } = getOrderLocationExtras(order);
+      const data = buildAgentOrderDataExtras(order, 'new_order');
+      const city = order.deliveryAddress?.city || 'customer';
+      const bodyText = addressLine
+        ? `Order #${order.orderId} · ${truncateForNotification(addressLine)}`
+        : `Order #${order.orderId} · Deliver to ${city}`;
+
+      await sendPushNotification(
+        lockedAgent.fcmToken,
+        '🎉 New Order Assigned!',
+        bodyText,
+        data,
+        mapImageUrl ? { imageUrl: mapImageUrl } : {}
+      );
+    }
+
+    await notifyCustomerOrderAssigned(order, lockedAgent, customer);
+
+    if (io) {
+      const assignBanner = getCustomerOrderBannerCopy(order, 'ASSIGNED', lockedAgent.name);
+      io.to(`customer:${order.customer}`).emit('order:assigned', {
+        order: {
+          _id: order._id,
+          orderId: order.orderId,
+          status: order.status,
+          assignedAt: order.assignedAt,
+        },
+        agent: {
+          _id: lockedAgent._id,
+          name: lockedAgent.name,
+          phone: lockedAgent.phone,
+          vehicleType: lockedAgent.vehicleType,
+          vehicleNumber: lockedAgent.vehicleNumber,
+        },
+        title: assignBanner?.title,
+        subtitle: assignBanner?.body,
+      });
+      io.to('admin:dashboard').emit('order:assigned', {
+        orderId: order.orderId,
+        agent: lockedAgent.name,
+      });
+    }
+
+    logger.info(`Queued order ${order._id} assigned to available agent ${lockedAgent.name}`);
+    return lockedAgent;
+  } catch (error) {
+    logger.error(`assignNextOrderToAgent error: ${error.message}`);
+    return null;
+  }
+};
+
 // Reassign order when agent is deleted or unavailable
 export const reassignOrder = async (orderId, io) => {
   try {
@@ -250,16 +375,8 @@ export const freeAgentAfterDelivery = async (agentId, io) => {
     if (!agent) return;
 
     // Check for pending orders
-    const pendingOrder = await Order.findOne({
-      status: 'AUTO_APPROVED',
-      assignedAgent: null,
-      paymentStatus: 'PAID',
-    }).sort({ createdAt: 1 });
-
-    if (pendingOrder) {
-      // Assign pending order to this agent
-      await assignOrderToAgent(pendingOrder._id, io);
-    } else {
+    const assigned = await assignNextOrderToAgent(agentId, io);
+    if (!assigned) {
       // Just mark agent as available
       agent.isAvailable = true;
       await agent.save();
@@ -279,6 +396,7 @@ export const freeAgentAfterDelivery = async (agentId, io) => {
 
 export default {
   assignOrderToAgent,
+  assignNextOrderToAgent,
   reassignOrder,
   processPendingOrders,
   freeAgentAfterDelivery,

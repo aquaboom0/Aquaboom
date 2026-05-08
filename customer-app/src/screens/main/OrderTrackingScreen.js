@@ -9,9 +9,11 @@ import {
   Linking,
   Alert,
   Image,
+  BackHandler,
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE, Circle } from 'react-native-maps';
 import { WebView } from 'react-native-webview';
+import { CommonActions, useFocusEffect } from '@react-navigation/native';
 import { useDispatch, useSelector } from 'react-redux';
 import {
   fetchOrderDetails,
@@ -177,6 +179,30 @@ const OrderTrackingScreen = ({ route, navigation }) => {
     }
   }, [agent?.latitude, agent?.longitude, destination?.latitude, destination?.longitude, routeCoords]);
 
+  const exitTrackingScreen = useCallback(() => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return true;
+    }
+
+    // Guaranteed escape route when this screen is opened directly / from push.
+    navigation.dispatch(
+      CommonActions.reset({
+        index: 0,
+        routes: [
+          {
+            name: 'MainTabs',
+            state: {
+              index: 1,
+              routes: [{ name: 'Home' }, { name: 'Orders' }, { name: 'Cart' }, { name: 'Profile' }],
+            },
+          },
+        ],
+      })
+    );
+    return true;
+  }, [navigation]);
+
   useEffect(() => {
     if (!orderId) return;
     dispatch(fetchOrderDetails(orderId));
@@ -283,6 +309,14 @@ const OrderTrackingScreen = ({ route, navigation }) => {
     return () => clearTimeout(t);
   }, [routeCoords, fitCamera]);
 
+  useFocusEffect(
+    useCallback(() => {
+      const onHardwareBack = () => exitTrackingScreen();
+      const sub = BackHandler.addEventListener('hardwareBackPress', onHardwareBack);
+      return () => sub.remove();
+    }, [exitTrackingScreen])
+  );
+
   useEffect(() => {
     setNativeMapLoaded(false);
     setMapLoadGracePassed(false);
@@ -335,13 +369,7 @@ const OrderTrackingScreen = ({ route, navigation }) => {
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity
-          onPress={() => {
-            if (navigation.canGoBack()) {
-              navigation.goBack();
-            } else {
-              navigation.navigate('Orders');
-            }
-          }}
+          onPress={exitTrackingScreen}
         >
           <Text style={styles.back}>←</Text>
         </TouchableOpacity>

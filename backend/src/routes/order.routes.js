@@ -9,6 +9,7 @@ import { broadcastPendingOrder, pushNotifyAgentsNewPending } from '../services/o
 import { notifyCustomerOrderPlaced, notifyCustomerStatusUpdate } from '../services/notification.service.js';
 import { createRazorpayOrder, verifyRazorpayPayment, refundPayment } from '../config/razorpay.js';
 import { logger } from '../config/logger.js';
+import { assignNextOrderToAgent, processPendingOrders } from '../services/orderAssignment.service.js';
 
 const router = express.Router();
 
@@ -305,10 +306,16 @@ router.post('/:orderId/cancel', verifyCustomerToken, async (req, res) => {
 
     // Free up agent if assigned
     if (order.assignedAgent) {
-      await DeliveryAgent.findByIdAndUpdate(order.assignedAgent, {
+      const freed = await DeliveryAgent.findByIdAndUpdate(order.assignedAgent, {
         isAvailable: true,
         activeOrderId: null,
-      });
+      }, { new: true });
+
+      const io = req.app.get('io');
+      if (freed?.isActive && freed?.isOnline && freed?.isAvailable && !freed?.activeOrderId) {
+        await assignNextOrderToAgent(freed._id, io);
+      }
+      await processPendingOrders(io);
     }
 
     order.status = 'CANCELLED';

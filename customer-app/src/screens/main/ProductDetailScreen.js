@@ -6,10 +6,9 @@ import {
   TouchableOpacity,
   StyleSheet,
   Image,
-  Alert,
 } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
-import { addToCart, removeFromCart } from '../../store/slices/cartSlice';
+import { addToCart } from '../../store/slices/cartSlice';
 import { COLORS } from '../../config';
 
 const ProductDetailScreen = ({ route, navigation }) => {
@@ -25,22 +24,7 @@ const ProductDetailScreen = ({ route, navigation }) => {
   };
 
   const handleRemoveFromCart = () => {
-    if (quantity === 1) {
-      Alert.alert(
-        'Remove Item',
-        'Do you want to remove this item from cart?',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { 
-            text: 'Remove', 
-            style: 'destructive',
-            onPress: () => dispatch(removeFromCart(product._id))
-          },
-        ]
-      );
-    } else {
-      dispatch(addToCart({ ...product, quantity: -1 }));
-    }
+    dispatch(addToCart({ ...product, quantity: -1 }));
   };
 
   const handleBuyNow = () => {

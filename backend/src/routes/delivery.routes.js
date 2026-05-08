@@ -4,7 +4,7 @@ import Order from '../models/Order.js';
 import DeliveryAgent from '../models/DeliveryAgent.js';
 import { exclusiveEndIndianCalendarDay, startOfIndianCalendarDay } from '../utils/indianTime.js';
 import { verifyDeliveryAgentToken } from '../middleware/adminAuth.middleware.js';
-import { freeAgentAfterDelivery } from '../services/orderAssignment.service.js';
+import { freeAgentAfterDelivery, assignNextOrderToAgent, processPendingOrders } from '../services/orderAssignment.service.js';
 import { approvePendingOrder, declinePendingOrder } from '../services/orderApproval.service.js';
 import { notifyCustomerStatusUpdate, getCustomerOrderBannerCopy } from '../services/notification.service.js';
 import User from '../models/User.js';
@@ -44,6 +44,19 @@ router.patch('/status', verifyDeliveryAgentToken, async (req, res) => {
     }
 
     const io = req.app.get('io');
+    const shouldTryQueueAssign =
+      Boolean(agent?.isActive) &&
+      Boolean(agent?.isOnline) &&
+      Boolean(agent?.isAvailable) &&
+      !agent?.activeOrderId;
+
+    // Critical: if admin approved while partner was busy/offline, assign oldest queued order now.
+    if (shouldTryQueueAssign) {
+      await assignNextOrderToAgent(agent._id, io);
+      // Also process queue globally in case multiple agents/orders are waiting.
+      await processPendingOrders(io);
+    }
+
     if (io) {
       io.to('admin:dashboard').emit('agent:fleetUpdate', {
         agentId: String(agent._id),
@@ -247,6 +260,43 @@ router.get('/my-orders', verifyDeliveryAgentToken, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch orders.',
+    });
+  }
+});
+
+// Global approved queue visible to delivery partners (FIFO).
+router.get('/queue-orders', verifyDeliveryAgentToken, async (req, res) => {
+  try {
+    const { limit = 25 } = req.query;
+    const safeLimit = Math.max(1, Math.min(100, Number(limit) || 25));
+
+    const queued = await Order.find({
+      status: 'AUTO_APPROVED',
+      assignedAgent: null,
+      paymentStatus: 'PAID',
+    })
+      .populate('customer', 'name phone')
+      .sort({ createdAt: 1 })
+      .limit(safeLimit);
+
+    const data = queued.map((order, idx) => ({
+      ...order.toObject(),
+      queuePosition: idx + 1,
+    }));
+
+    res.json({
+      success: true,
+      data,
+      queueCount: data.length,
+      message: data.length
+        ? 'Approved orders waiting for next available partner.'
+        : 'Queue is empty.',
+    });
+  } catch (error) {
+    logger.error(`Get queue orders error: ${error.message}`);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch queued orders.',
     });
   }
 });

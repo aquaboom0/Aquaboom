@@ -39,6 +39,7 @@ const DeliveryDashboardScreen = ({ navigation }) => {
   const dispatch = useDispatch();
   const authUser = useSelector((s) => s.auth.user);
   const [orders, setOrders] = useState([]);
+  const [queueOrders, setQueueOrders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   /** Single control: Available for dispatch (= isOnline && isAvailable on server). */
@@ -84,8 +85,13 @@ const DeliveryDashboardScreen = ({ navigation }) => {
   const loadOrders = async () => {
     try {
       setLoading(true);
-      const [ordersRes] = await Promise.all([deliveryAPI.getMyOrders(), loadEarningsSummary()]);
+      const [ordersRes, queueRes] = await Promise.all([
+        deliveryAPI.getMyOrders(),
+        deliveryAPI.getQueueOrders({ limit: 20 }),
+        loadEarningsSummary(),
+      ]);
       setOrders(ordersRes.data?.data || []);
+      setQueueOrders(queueRes.data?.data || []);
     } catch (error) {
       Alert.alert('Error', error.response?.data?.message || 'Failed to load orders');
     } finally {
@@ -95,7 +101,11 @@ const DeliveryDashboardScreen = ({ navigation }) => {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([deliveryAPI.getMyOrders().then((res) => setOrders(res.data?.data || [])), loadEarningsSummary()]);
+    await Promise.all([
+      deliveryAPI.getMyOrders().then((res) => setOrders(res.data?.data || [])),
+      deliveryAPI.getQueueOrders({ limit: 20 }).then((res) => setQueueOrders(res.data?.data || [])),
+      loadEarningsSummary(),
+    ]);
     setRefreshing(false);
   };
 
@@ -178,6 +188,7 @@ const DeliveryDashboardScreen = ({ navigation }) => {
       await deliveryAPI.updateOrderStatus(order._id, next);
       await Promise.all([
         deliveryAPI.getMyOrders().then((res) => setOrders(res.data?.data || [])),
+        deliveryAPI.getQueueOrders({ limit: 20 }).then((res) => setQueueOrders(res.data?.data || [])),
         loadEarningsSummary(),
       ]);
     } catch (error) {
@@ -237,6 +248,13 @@ const DeliveryDashboardScreen = ({ navigation }) => {
           <Text style={styles.statHint}>{rupeeShort(earnings.lifetimeEarnings)} from delivery fees</Text>
         </View>
       </View>
+      <View style={styles.statsRow}>
+        <View style={[styles.statCard, styles.statCardGrow, styles.statCardLast]}>
+          <Text style={styles.statValue}>{queueOrders.length}</Text>
+          <Text style={styles.statLabel}>Queue waiting</Text>
+          <Text style={styles.statHint}>Approved by admin, waiting for next available partner</Text>
+        </View>
+      </View>
 
       <View style={styles.statusCard}>
         <View style={styles.statusMainRow}>
@@ -263,6 +281,30 @@ const DeliveryDashboardScreen = ({ navigation }) => {
         <TouchableOpacity style={styles.fetchBtn} onPress={handleFetchCurrentLocation}>
           <Text style={styles.fetchBtnText}>Share current location now</Text>
         </TouchableOpacity>
+      </View>
+
+      <View style={styles.queueCard}>
+        <View style={styles.queueHeader}>
+          <Text style={styles.queueTitle}>Queue Line</Text>
+          <View style={styles.queueBadge}>
+            <Text style={styles.queueBadgeText}>{queueOrders.length}</Text>
+          </View>
+        </View>
+        {queueOrders.length === 0 ? (
+          <Text style={styles.queueEmpty}>No queued approved orders right now.</Text>
+        ) : (
+          queueOrders.slice(0, 5).map((q) => (
+            <View key={q._id} style={styles.queueItem}>
+              <Text style={styles.queueItemTitle}>#{q.orderId}</Text>
+              <Text style={styles.queueItemMeta}>
+                Position {q.queuePosition || '-'} · Rs {q.totalAmount}
+              </Text>
+              <Text style={styles.queueItemMeta}>
+                {q.customer?.name || 'Customer'}{q.deliveryAddress?.city ? ` · ${q.deliveryAddress.city}` : ''}
+              </Text>
+            </View>
+          ))
+        )}
       </View>
 
       {loading ? (
@@ -368,6 +410,29 @@ const styles = StyleSheet.create({
   locationHint: { marginTop: 6, color: '#92400e', fontSize: 11 },
   fetchBtn: { marginTop: 10, backgroundColor: '#e0f2fe', borderRadius: 8, paddingVertical: 10, alignItems: 'center' },
   fetchBtnText: { color: COLORS.primaryDark, fontWeight: '700', fontSize: 12 },
+  queueCard: { backgroundColor: COLORS.surface, borderRadius: 12, padding: 12, marginBottom: 12 },
+  queueHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  queueTitle: { fontSize: 15, fontWeight: '800', color: COLORS.text },
+  queueBadge: {
+    minWidth: 24,
+    height: 24,
+    borderRadius: 12,
+    paddingHorizontal: 7,
+    backgroundColor: '#ede9fe',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  queueBadgeText: { color: '#6d28d9', fontSize: 12, fontWeight: '800' },
+  queueEmpty: { color: COLORS.textLight, fontSize: 12 },
+  queueItem: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 10,
+    padding: 10,
+    marginTop: 8,
+  },
+  queueItemTitle: { color: COLORS.text, fontWeight: '800', fontSize: 13 },
+  queueItemMeta: { color: COLORS.textLight, fontSize: 12, marginTop: 2 },
   item: { backgroundColor: COLORS.surface, borderRadius: 12, padding: 12, marginBottom: 10 },
   itemTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   itemTitle: { fontSize: 15, fontWeight: '800', color: COLORS.text },

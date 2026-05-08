@@ -8,7 +8,7 @@ import Product from '../models/Product.js';
 import DeliveryAgent from '../models/DeliveryAgent.js';
 import User from '../models/User.js';
 import { verifyAdminToken } from '../middleware/adminAuth.middleware.js';
-import { assignOrderToAgent, reassignOrder } from '../services/orderAssignment.service.js';
+import { assignOrderToAgent, reassignOrder, assignNextOrderToAgent, processPendingOrders } from '../services/orderAssignment.service.js';
 import { approvePendingOrder, declinePendingOrder } from '../services/orderApproval.service.js';
 import {
   notifyCustomerStatusUpdate,
@@ -839,10 +839,16 @@ router.patch('/orders/:orderId/status', verifyAdminToken, async (req, res) => {
       
       // Free agent if assigned
       if (order.assignedAgent) {
-        await DeliveryAgent.findByIdAndUpdate(order.assignedAgent, {
+        const freed = await DeliveryAgent.findByIdAndUpdate(order.assignedAgent, {
           isAvailable: true,
           activeOrderId: null,
-        });
+        }, { new: true });
+
+        const io = req.app.get('io');
+        if (freed?.isActive && freed?.isOnline && freed?.isAvailable && !freed?.activeOrderId) {
+          await assignNextOrderToAgent(freed._id, io);
+        }
+        await processPendingOrders(io);
       }
     }
 

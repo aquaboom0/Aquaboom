@@ -78,7 +78,7 @@ const HomeScreen = ({ navigation }) => {
   };
 
   const getCartQuantity = (productId) => {
-    const item = cartItems.find(i => i._id === productId);
+    const item = cartItems.find((i) => i?.product?._id === productId);
     return item ? item.quantity : 0;
   };
 
@@ -130,14 +130,14 @@ const HomeScreen = ({ navigation }) => {
           {item.inStock ? (
             quantity > 0 ? (
               <View style={styles.quantityControl}>
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.quantityButton}
                   onPress={() => dispatch(addToCart({ ...item, quantity: -1 }))}
                 >
                   <Text style={styles.quantityButtonText}>−</Text>
                 </TouchableOpacity>
                 <Text style={styles.quantityText}>{quantity}</Text>
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.quantityButton}
                   onPress={() => dispatch(addToCart(item))}
                 >

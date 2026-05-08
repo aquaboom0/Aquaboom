@@ -206,6 +206,7 @@ export const adminAPI = {
 export const deliveryAPI = {
   getEarningsSummary: () => api.get('/delivery/earnings-summary'),
   getMyOrders: (params) => api.get('/delivery/my-orders', { params }),
+  getQueueOrders: (params) => api.get('/delivery/queue-orders', { params }),
   getDeliveryOrder: (orderId) => api.get(`/delivery/order/${orderId}`),
   getPendingApproval: () => api.get('/delivery/pending-approval'),
   approveOrder: (orderId) => api.post(`/delivery/order/${orderId}/approve`),
