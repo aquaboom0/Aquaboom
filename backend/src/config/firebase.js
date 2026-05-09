@@ -22,8 +22,10 @@ export const initializeFirebase = () => {
       return null;
     }
 
+    const databaseURL = process.env.FIREBASE_DATABASE_URL;
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount),
+      ...(databaseURL ? { databaseURL } : {}),
     });
 
     firebaseInitialized = true;
@@ -32,6 +34,23 @@ export const initializeFirebase = () => {
   } catch (error) {
     logger.error(`Firebase initialization error: ${error.message}`);
     return null;
+  }
+};
+
+/** Sync active order rider position to Realtime Database for customer map subscribers. */
+export const syncOrderLiveTrackingToRtdb = async (orderId, { lat, lng, agentId, agentName }) => {
+  const databaseURL = process.env.FIREBASE_DATABASE_URL;
+  if (!firebaseInitialized || !databaseURL || !orderId) return;
+  try {
+    await admin.database().ref(`liveTracking/${String(orderId)}`).set({
+      lat: Number(lat),
+      lng: Number(lng),
+      agentId: String(agentId),
+      agentName: agentName != null ? String(agentName) : '',
+      updatedAt: Date.now(),
+    });
+  } catch (error) {
+    logger.warn(`Realtime DB liveTracking sync failed: ${error.message}`);
   }
 };
 

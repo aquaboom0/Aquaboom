@@ -152,7 +152,7 @@ export default function AgentOrderDetailScreen({ route, navigation }) {
       }
     };
     sync();
-    const id = setInterval(sync, 14000);
+    const id = setInterval(sync, 8000);
     return () => {
       cancelled = true;
       clearInterval(id);
@@ -256,22 +256,28 @@ export default function AgentOrderDetailScreen({ route, navigation }) {
     else Alert.alert('Unavailable', 'No phone number for this customer.');
   };
 
-  const handleNavigateMaps = () => {
-    const c = dropoffCoord;
-    if (c && agentPos) {
-      Linking.openURL(
-        `https://www.google.com/maps/dir/?api=1&origin=${agentPos.latitude},${agentPos.longitude}&destination=${c.latitude},${c.longitude}&travelmode=driving`
+  const handleNavigateMaps = async () => {
+    try {
+      const c = dropoffCoord;
+      if (c && agentPos) {
+        await Linking.openURL(
+          `https://www.google.com/maps/dir/?api=1&origin=${agentPos.latitude},${agentPos.longitude}&destination=${c.latitude},${c.longitude}&travelmode=driving`
+        );
+        return;
+      }
+      if (c) {
+        await Linking.openURL(
+          `https://www.google.com/maps/dir/?api=1&destination=${c.latitude},${c.longitude}&travelmode=driving`
+        );
+        return;
+      }
+      const q = encodeURIComponent(formatAddress(order?.deliveryAddress) || '');
+      await Linking.openURL(
+        `https://www.google.com/maps/search/?api=1&query=${q || encodeURIComponent('India')}`
       );
-      return;
+    } catch {
+      Alert.alert('Maps', 'Could not open Google Maps. Install the app or try again.');
     }
-    if (c) {
-      Linking.openURL(
-        `https://www.google.com/maps/dir/?api=1&destination=${c.latitude},${c.longitude}&travelmode=driving`
-      );
-      return;
-    }
-    const q = encodeURIComponent(formatAddress(order?.deliveryAddress) || '');
-    Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${q || encodeURIComponent('India')}`);
   };
 
   const handleNextStatus = () => {
@@ -375,6 +381,13 @@ export default function AgentOrderDetailScreen({ route, navigation }) {
                 </Text>
               </View>
             ) : null}
+            <TouchableOpacity
+              style={styles.mapsFab}
+              onPress={handleNavigateMaps}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.mapsFabTxt}>Open in Google Maps</Text>
+            </TouchableOpacity>
           </View>
           {dropoffCoord ? null : (
             <Text style={styles.mapFallbackNote}>
@@ -546,6 +559,27 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   mapHintTxt: { fontSize: 11, color: COLORS.textLight },
+  mapsFab: {
+    position: 'absolute',
+    right: 10,
+    bottom: 10,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderRadius: 22,
+    maxWidth: '88%',
+    shadowColor: '#000',
+    shadowOpacity: 0.22,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 5,
+  },
+  mapsFabTxt: {
+    color: COLORS.surface,
+    fontWeight: '800',
+    fontSize: 13,
+    textAlign: 'center',
+  },
   mapFallbackNote: {
     marginTop: 10,
     fontSize: 12,

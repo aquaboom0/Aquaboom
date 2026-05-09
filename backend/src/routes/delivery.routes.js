@@ -14,6 +14,7 @@ import {
 import User from '../models/User.js';
 import { logger } from '../config/logger.js';
 import { getDrivingRoute } from '../services/mapsDirections.service.js';
+import { syncOrderLiveTrackingToRtdb } from '../config/firebase.js';
 
 const router = express.Router();
 
@@ -742,6 +743,13 @@ router.patch('/location', verifyDeliveryAgentToken, async (req, res) => {
         lat,
         lng,
         orderId: oid,
+      });
+
+      syncOrderLiveTrackingToRtdb(oid, {
+        lat,
+        lng,
+        agentId: req.agentId,
+        agentName: agent?.name,
       });
     }
 

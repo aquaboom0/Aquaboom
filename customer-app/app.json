@@ -47,7 +47,14 @@
       "apiBaseUrl": "https://aquaboom.onrender.com",
       "apiPort": 5001,
       "apiLanHost": "192.168.1.3",
-      "useLanForAndroid": true
+      "useLanForAndroid": true,
+      "firebaseApiKey": "",
+      "firebaseAuthDomain": "aquaboom-3bdc0.firebaseapp.com",
+      "firebaseDatabaseURL": "https://aquaboom-3bdc0-default-rtdb.asia-southeast1.firebasedatabase.app",
+      "firebaseProjectId": "aquaboom-3bdc0",
+      "firebaseStorageBucket": "aquaboom-3bdc0.appspot.com",
+      "firebaseMessagingSenderId": "",
+      "firebaseAppId": ""
     }
   }
 }

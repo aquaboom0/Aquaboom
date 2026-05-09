@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,10 +8,8 @@ import {
   ScrollView,
   Linking,
   Alert,
-  Image,
   BackHandler,
 } from 'react-native';
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE, Circle } from 'react-native-maps';
 import { WebView } from 'react-native-webview';
 import { CommonActions, useFocusEffect } from '@react-navigation/native';
 import { useDispatch, useSelector } from 'react-redux';
@@ -22,11 +20,10 @@ import {
 } from '../../store/slices/orderSlice';
 import { connectSocket, disconnectSocket } from '../../store/slices/socketSlice';
 import { trackingAPI } from '../../services/api';
+import { subscribeOrderLiveTracking } from '../../services/liveTrackingRtdb';
 import { COLORS } from '../../config';
-import { coordsForFit, thinCoordinates } from '../../utils/mapRoute';
+import { thinCoordinates } from '../../utils/mapRoute';
 import { buildLeafletTrackingHtml } from '../../utils/leafletMapHtml';
-
-const LIVE_TRACKER_ICON = require('../../../assets/map-live-truck.png');
 
 const toCoord = (lat, lng) => {
   const latitude = Number(lat);
@@ -61,16 +58,6 @@ const latestTrackingCoord = (trackingHistory) => {
   return null;
 };
 
-const ZEPTO_MAP_STYLE = [
-  { elementType: 'geometry', stylers: [{ color: '#f4f4f8' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#6b7280' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#ffffff' }] },
-  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#ffffff' }] },
-  { featureType: 'road.arterial', elementType: 'geometry', stylers: [{ color: '#eef2ff' }] },
-  { featureType: 'poi', stylers: [{ visibility: 'off' }] },
-  { featureType: 'transit', stylers: [{ visibility: 'off' }] },
-];
-
 const OrderTrackingScreen = ({ route, navigation }) => {
   const orderId = route?.params?.orderId;
   const dispatch = useDispatch();
@@ -81,9 +68,6 @@ const OrderTrackingScreen = ({ route, navigation }) => {
   const [routeCoords, setRouteCoords] = useState([]);
   const [routeLoading, setRouteLoading] = useState(false);
   const [driveMeta, setDriveMeta] = useState(null);
-  const [nativeMapLoaded, setNativeMapLoaded] = useState(false);
-  const [mapLoadGracePassed, setMapLoadGracePassed] = useState(false);
-  const mapRef = useRef(null);
 
   const order = useMemo(() => {
     const id = orderId != null ? String(orderId) : '';
@@ -148,37 +132,6 @@ const OrderTrackingScreen = ({ route, navigation }) => {
     return destination ? 'Waiting for rider position…' : 'Calculating…';
   }, [driveMeta, etaMinutesFromDistance, destination]);
 
-  const fitCamera = useCallback(() => {
-    if (!mapRef.current) return;
-    const pts = coordsForFit([agent, destination, routeCoords]);
-    if (pts.length < 2 && destination) {
-      mapRef.current.animateToRegion({
-        latitude: destination.latitude,
-        longitude: destination.longitude,
-        latitudeDelta: 0.06,
-        longitudeDelta: 0.06,
-      });
-      return;
-    }
-    if (pts.length === 1) {
-      mapRef.current.animateToRegion({
-        latitude: pts[0].latitude,
-        longitude: pts[0].longitude,
-        latitudeDelta: 0.08,
-        longitudeDelta: 0.08,
-      });
-      return;
-    }
-    try {
-      mapRef.current.fitToCoordinates(pts, {
-        edgePadding: { top: 70, right: 36, bottom: 70, left: 36 },
-        animated: true,
-      });
-    } catch (_e) {
-      // ignore rare layout timing issues
-    }
-  }, [agent?.latitude, agent?.longitude, destination?.latitude, destination?.longitude, routeCoords]);
-
   const exitTrackingScreen = useCallback(() => {
     if (navigation.canGoBack()) {
       navigation.goBack();
@@ -219,6 +172,20 @@ const OrderTrackingScreen = ({ route, navigation }) => {
     };
     const id = setInterval(refresh, 12000);
     return () => clearInterval(id);
+  }, [dispatch, orderId]);
+
+  useEffect(() => {
+    if (!orderId) return;
+    const unsub = subscribeOrderLiveTracking(String(orderId), ({ lat, lng }) => {
+      dispatch(
+        setAgentLocation({
+          orderId: String(orderId),
+          location: { lat, lng },
+        })
+      );
+      setLastUpdatedAt(Date.now());
+    });
+    return () => unsub();
   }, [dispatch, orderId]);
 
   useEffect(() => {
@@ -296,18 +263,11 @@ const OrderTrackingScreen = ({ route, navigation }) => {
     loadRoute();
     const iv = setInterval(loadRoute, 28000);
 
-    const tFit = setTimeout(fitCamera, 800);
     return () => {
       cancelled = true;
       clearInterval(iv);
-      clearTimeout(tFit);
     };
-  }, [orderId, agent?.latitude, agent?.longitude, destination?.latitude, destination?.longitude, fitCamera]);
-
-  useEffect(() => {
-    const t = setTimeout(fitCamera, 500);
-    return () => clearTimeout(t);
-  }, [routeCoords, fitCamera]);
+  }, [orderId, agent?.latitude, agent?.longitude, destination?.latitude, destination?.longitude]);
 
   useFocusEffect(
     useCallback(() => {
@@ -316,13 +276,6 @@ const OrderTrackingScreen = ({ route, navigation }) => {
       return () => sub.remove();
     }, [exitTrackingScreen])
   );
-
-  useEffect(() => {
-    setNativeMapLoaded(false);
-    setMapLoadGracePassed(false);
-    const t = setTimeout(() => setMapLoadGracePassed(true), 5500);
-    return () => clearTimeout(t);
-  }, [orderId, agent?.latitude, agent?.longitude, destination?.latitude, destination?.longitude]);
 
   const openExternalMap = async () => {
     try {
@@ -345,8 +298,8 @@ const OrderTrackingScreen = ({ route, navigation }) => {
 
   const centerLat = destination?.latitude || agent?.latitude || 20.5937;
   const centerLng = destination?.longitude || agent?.longitude || 78.9629;
-  const showFallbackWebMap = Boolean((destination || agent) && mapLoadGracePassed && !nativeMapLoaded);
-  const fallbackHtml = useMemo(
+
+  const leafletHtml = useMemo(
     () =>
       buildLeafletTrackingHtml({
         center: { latitude: centerLat, longitude: centerLng },
@@ -394,68 +347,10 @@ const OrderTrackingScreen = ({ route, navigation }) => {
       </View>
 
       <View style={styles.mapCard}>
-        {(destination || agent) && !showFallbackWebMap ? (
-          <MapView
-            ref={mapRef}
-            style={styles.mapView}
-            provider={PROVIDER_GOOGLE}
-            customMapStyle={ZEPTO_MAP_STYLE}
-            initialRegion={{
-              latitude: centerLat,
-              longitude: centerLng,
-              latitudeDelta: 0.08,
-              longitudeDelta: 0.08,
-            }}
-            onMapReady={() => fitCamera()}
-            onMapLoaded={() => setNativeMapLoaded(true)}
-            showsUserLocation={false}
-            showsCompass={false}
-            showsTraffic={false}
-            showsIndoors={false}
-            toolbarEnabled={false}
-            rotateEnabled={false}
-            pitchEnabled={false}
-          >
-            {destination ? (
-              <Marker coordinate={destination} title="Deliver to you" pinColor={COLORS.primaryDark} />
-            ) : null}
-            {agent ? (
-              <Circle
-                center={agent}
-                radius={45}
-                strokeWidth={0}
-                fillColor="rgba(108,43,217,0.14)"
-              />
-            ) : null}
-            {agent ? (
-              <Marker
-                coordinate={agent}
-                title="Delivery partner"
-                description={
-                  order?.assignedAgent?.vehicleNumber || trackingInfo?.agent?.vehicleNumber
-                    ? `Vehicle ${order?.assignedAgent?.vehicleNumber || trackingInfo?.agent?.vehicleNumber}`
-                    : ''
-                }
-                anchor={{ x: 0.5, y: 0.85 }}
-                tracksViewChanges={false}
-              >
-                <View style={styles.bikeBubble}>
-                  <Image source={LIVE_TRACKER_ICON} style={styles.bikeIconImage} resizeMode="contain" />
-                </View>
-              </Marker>
-            ) : null}
-            {routeCoords?.length >= 2 ? (
-              <Polyline
-                coordinates={routeCoords}
-                strokeColor="#6C2BD9"
-                strokeWidth={6}
-              />
-            ) : null}
-          </MapView>
-        ) : showFallbackWebMap ? (
+        {(destination || agent) ? (
           <WebView
             style={styles.mapWeb}
-            source={{ html: fallbackHtml }}
+            source={{ html: leafletHtml }}
             originWhitelist={['*']}
             javaScriptEnabled
             domStorageEnabled
@@ -463,7 +358,7 @@ const OrderTrackingScreen = ({ route, navigation }) => {
             renderLoading={() => (
               <View style={styles.loadingOverlay}>
                 <ActivityIndicator color={COLORS.primary} />
-                <Text style={styles.loadingText}>Loading fallback map…</Text>
+                <Text style={styles.loadingText}>Loading map…</Text>
               </View>
             )}
           />
@@ -474,7 +369,7 @@ const OrderTrackingScreen = ({ route, navigation }) => {
         )}
         <View style={styles.livePill}>
           <Text style={styles.livePillText}>
-            {agent ? (showFallbackWebMap ? 'Live rider tracking (fallback)' : 'Live rider tracking') : 'Waiting for rider location'}
+            {agent ? 'Live • Leaflet · OpenStreetMap' : 'Waiting for rider GPS'}
           </Text>
         </View>
       </View>
@@ -489,7 +384,7 @@ const OrderTrackingScreen = ({ route, navigation }) => {
         </Text>
         <Text style={styles.line}>Destination: {destinationText || 'Not available'}</Text>
         <TouchableOpacity style={styles.button} onPress={openExternalMap}>
-          <Text style={styles.buttonText}>Open navigation (Google Maps)</Text>
+          <Text style={styles.buttonText}>Open in Google Maps app</Text>
         </TouchableOpacity>
       </ScrollView>
     </View>
@@ -529,24 +424,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     position: 'relative',
   },
-  mapView: { flex: 1, backgroundColor: '#e2e8f0' },
   mapWeb: { flex: 1, backgroundColor: '#e2e8f0' },
-  bikeBubble: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#fff',
-    borderWidth: 1.5,
-    borderColor: COLORS.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 4,
-  },
-  bikeIconImage: { width: 26, height: 26 },
   loadingOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#eef2f7' },
   loadingText: { marginTop: 6, fontSize: 12, color: COLORS.textLight },
   livePill: {
