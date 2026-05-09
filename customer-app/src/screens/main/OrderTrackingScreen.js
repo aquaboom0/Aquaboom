@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   Linking,
   Alert,
   BackHandler,
+  Platform,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { CommonActions, useFocusEffect } from '@react-navigation/native';
@@ -68,6 +69,9 @@ const OrderTrackingScreen = ({ route, navigation }) => {
   const [routeCoords, setRouteCoords] = useState([]);
   const [routeLoading, setRouteLoading] = useState(false);
   const [driveMeta, setDriveMeta] = useState(null);
+  const [mapBootOk, setMapBootOk] = useState(null);
+  const [webRemount, setWebRemount] = useState(0);
+  const mapWebRef = useRef(null);
 
   const order = useMemo(() => {
     const id = orderId != null ? String(orderId) : '';
@@ -277,8 +281,31 @@ const OrderTrackingScreen = ({ route, navigation }) => {
     }, [exitTrackingScreen])
   );
 
+  const injectMapFix = useCallback(() => {
+    const js = `
+      try {
+        if (window.__invalidate) { window.__invalidate(); }
+        else if (window.__fitTracking) { window.__fitTracking(); }
+      } catch (_e) {}
+      true;
+    `;
+    mapWebRef.current?.injectJavaScript(js);
+  }, []);
+
   const openExternalMap = async () => {
     try {
+      if (destination) {
+        const label = encodeURIComponent(destinationText || 'Delivery');
+        const geo = `geo:${destination.latitude},${destination.longitude}?q=${destination.latitude},${destination.longitude}(${label})`;
+        if (Platform.OS === 'android') {
+          const can = await Linking.canOpenURL(geo).catch(() => false);
+          if (can) {
+            await Linking.openURL(geo);
+            return;
+          }
+        }
+      }
+
       let url = '';
       if (agent && destination) {
         url = `https://www.google.com/maps/dir/?api=1&origin=${agent.latitude},${agent.longitude}&destination=${destination.latitude},${destination.longitude}&travelmode=driving`;
@@ -287,14 +314,24 @@ const OrderTrackingScreen = ({ route, navigation }) => {
       } else if (destinationText) {
         url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(destinationText)}`;
       } else {
-        Alert.alert('Map unavailable', 'Destination not available yet.');
+        Alert.alert('Navigation', 'Destination is not available yet.');
         return;
       }
       await Linking.openURL(url);
     } catch (_e) {
-      Alert.alert('Error', 'Unable to open Google Maps.');
+      Alert.alert('Navigation', 'No maps app responded. Install Google Maps or another maps app.');
     }
   };
+
+  const onMapWebMessage = useCallback((event) => {
+    try {
+      const data = JSON.parse(event.nativeEvent.data);
+      if (data.type === 'map_ready') setMapBootOk(true);
+      if (data.type === 'map_boot_error') setMapBootOk(false);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const centerLat = destination?.latitude || agent?.latitude || 20.5937;
   const centerLng = destination?.longitude || agent?.longitude || 78.9629;
@@ -309,6 +346,10 @@ const OrderTrackingScreen = ({ route, navigation }) => {
       }),
     [centerLat, centerLng, agent, destination, routeCoords]
   );
+
+  useEffect(() => {
+    setMapBootOk(null);
+  }, [leafletHtml, webRemount]);
 
   if ((isLoading && !order) || !orderId) {
     return (
@@ -348,30 +389,81 @@ const OrderTrackingScreen = ({ route, navigation }) => {
 
       <View style={styles.mapCard}>
         {(destination || agent) ? (
-          <WebView
-            style={styles.mapWeb}
-            source={{ html: leafletHtml }}
-            originWhitelist={['*']}
-            javaScriptEnabled
-            domStorageEnabled
-            startInLoadingState
-            renderLoading={() => (
-              <View style={styles.loadingOverlay}>
-                <ActivityIndicator color={COLORS.primary} />
-                <Text style={styles.loadingText}>Loading map…</Text>
+          <>
+            <WebView
+              ref={mapWebRef}
+              key={`track-map-${String(orderId)}-${webRemount}`}
+              style={styles.mapWeb}
+              source={{
+                html: leafletHtml,
+                baseUrl: 'https://aquaboom.tracking.local',
+              }}
+              originWhitelist={['*']}
+              javaScriptEnabled
+              domStorageEnabled
+              cacheEnabled
+              mixedContentMode="always"
+              allowsInlineMediaPlayback
+              androidLayerType="hardware"
+              setBuiltInZoomControls={false}
+              startInLoadingState
+              nestedScrollEnabled
+              onLoadEnd={() => {
+                setTimeout(injectMapFix, 120);
+                setTimeout(injectMapFix, 400);
+              }}
+              onMessage={onMapWebMessage}
+              onError={() => setMapBootOk(false)}
+              onHttpError={() => setMapBootOk(false)}
+              renderLoading={() => (
+                <View style={styles.loadingOverlay}>
+                  <ActivityIndicator color={COLORS.primary} />
+                  <Text style={styles.loadingText}>Loading live map…</Text>
+                  <Text style={styles.loadingSub}>OpenStreetMap · not Google Maps</Text>
+                </View>
+              )}
+            />
+            <View style={styles.mapBrandPill} pointerEvents="none">
+              <View style={styles.mapBrandDot} />
+              <Text style={styles.mapBrandTxt}>AquaBoom · live map</Text>
+            </View>
+            <View style={styles.mapToolbar} pointerEvents="box-none">
+              <TouchableOpacity
+                style={styles.toolBtn}
+                onPress={injectMapFix}
+                accessibilityLabel="Fit route and rider on map"
+              >
+                <Text style={styles.toolBtnTxt}>Fit</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.toolBtn}
+                onPress={() => setWebRemount((n) => n + 1)}
+                accessibilityLabel="Reload map"
+              >
+                <Text style={styles.toolBtnTxt}>Reload</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.mapLegend} pointerEvents="none">
+              <View style={styles.legendItem}>
+                <View style={[styles.legendSwatch, styles.legendRider]} />
+                <Text style={styles.legendLabel}>Rider</Text>
               </View>
-            )}
-          />
+              <View style={styles.legendItem}>
+                <View style={[styles.legendSwatch, styles.legendDrop]} />
+                <Text style={styles.legendLabel}>Drop-off</Text>
+              </View>
+            </View>
+            {mapBootOk === false ? (
+              <View style={styles.mapWarn} pointerEvents="box-none">
+                <Text style={styles.mapWarnTxt}>Map tiles did not finish loading. Tap Reload or check internet.</Text>
+              </View>
+            ) : null}
+          </>
         ) : (
           <View style={styles.loadingOverlay}>
             <Text style={styles.loadingText}>Map data not available yet</Text>
           </View>
         )}
-        <View style={styles.livePill}>
-          <Text style={styles.livePillText}>
-            {agent ? 'Live • Leaflet · OpenStreetMap' : 'Waiting for rider GPS'}
-          </Text>
-        </View>
       </View>
 
       <ScrollView style={styles.sheet} showsVerticalScrollIndicator={false}>
@@ -384,8 +476,11 @@ const OrderTrackingScreen = ({ route, navigation }) => {
         </Text>
         <Text style={styles.line}>Destination: {destinationText || 'Not available'}</Text>
         <TouchableOpacity style={styles.button} onPress={openExternalMap}>
-          <Text style={styles.buttonText}>Open in Google Maps app</Text>
+          <Text style={styles.buttonText}>Open in maps app (turn-by-turn)</Text>
         </TouchableOpacity>
+        <Text style={styles.buttonHint}>
+          Opens Google Maps or your phone{'\u2019'}s default maps app.
+        </Text>
       </ScrollView>
     </View>
   );
@@ -417,32 +512,106 @@ const styles = StyleSheet.create({
   },
   mapCard: {
     marginHorizontal: 16,
-    borderRadius: 12,
-    backgroundColor: COLORS.surface,
+    borderRadius: 14,
+    backgroundColor: '#1e293b',
     overflow: 'hidden',
-    height: 300,
+    height: 380,
     marginBottom: 12,
     position: 'relative',
-  },
-  mapWeb: { flex: 1, backgroundColor: '#e2e8f0' },
-  loadingOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#eef2f7' },
-  loadingText: { marginTop: 6, fontSize: 12, color: COLORS.textLight },
-  livePill: {
-    position: 'absolute',
-    left: 10,
-    top: 10,
-    backgroundColor: 'rgba(255,255,255,0.94)',
-    borderRadius: 14,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
     borderWidth: 1,
     borderColor: COLORS.border,
   },
-  livePillText: {
+  mapWeb: {
+    flex: 1,
+    backgroundColor: '#e8eaf0',
+    opacity: 1,
+  },
+  loadingOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#eef2f7',
+    paddingHorizontal: 24,
+  },
+  loadingText: { marginTop: 8, fontSize: 13, fontWeight: '700', color: COLORS.text },
+  loadingSub: { marginTop: 6, fontSize: 11, color: COLORS.textLight, textAlign: 'center' },
+  mapBrandPill: {
+    position: 'absolute',
+    left: 10,
+    top: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.97)',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.45)',
+    gap: 8,
+    maxWidth: '78%',
+  },
+  mapBrandDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#22c55e',
+  },
+  mapBrandTxt: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: COLORS.primaryDark,
+    letterSpacing: 0.2,
+  },
+  mapToolbar: {
+    position: 'absolute',
+    right: 8,
+    top: 8,
+    flexDirection: 'row',
+    gap: 6,
+  },
+  toolBtn: {
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  toolBtnTxt: { fontSize: 12, fontWeight: '800', color: COLORS.primaryDark },
+  mapLegend: {
+    position: 'absolute',
+    left: 10,
+    right: 10,
+    bottom: 36,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 18,
+  },
+  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  legendSwatch: { width: 10, height: 10, borderRadius: 5 },
+  legendRider: { backgroundColor: '#6c2bd9', borderWidth: 1, borderColor: '#fff' },
+  legendDrop: { backgroundColor: '#4c1d95', borderWidth: 1, borderColor: '#fff' },
+  legendLabel: {
     fontSize: 11,
     fontWeight: '700',
-    color: COLORS.primaryDark,
+    color: '#f8fafc',
+    textShadowColor: 'rgba(0,0,0,0.55)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
+  mapWarn: {
+    position: 'absolute',
+    left: 8,
+    right: 8,
+    bottom: 8,
+    backgroundColor: 'rgba(254,242,242,0.96)',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#fecaca',
+  },
+  mapWarnTxt: { fontSize: 11, color: '#991b1b', fontWeight: '600', textAlign: 'center' },
   order: { color: COLORS.text, fontWeight: '700' },
   eta: { marginTop: 6, color: COLORS.primaryDark, fontWeight: '800', fontSize: 20 },
   metaDistance: { marginTop: 4, color: COLORS.textLight, fontSize: 13 },
@@ -462,6 +631,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   buttonText: { color: COLORS.surface, fontWeight: '800' },
+  buttonHint: {
+    marginTop: 8,
+    fontSize: 12,
+    color: COLORS.textLight,
+    textAlign: 'center',
+  },
 });
 
 export default OrderTrackingScreen;
